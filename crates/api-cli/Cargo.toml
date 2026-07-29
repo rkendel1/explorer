@@ -1,6 +1,20 @@
 [package]
 name = "api-cli"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [dependencies]
+api-analyzers = { path = "../api-analyzers" }
+api-client = { path = "../api-client" }
+api-compiler = { path = "../api-compiler" }
+api-core = { path = "../api-core" }
+api-discovery = { path = "../api-discovery" }
+api-mock-runtime = { path = "../api-mock-runtime" }
+api-repository = { path = "../api-repository" }
+api-storage = { path = "../api-storage" }
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio.workspace = true
