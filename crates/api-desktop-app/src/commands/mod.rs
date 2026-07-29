@@ -6,6 +6,7 @@
 pub mod change;
 pub mod contract;
 pub mod environment;
+pub mod journey;
 pub mod project;
 pub mod request;
 pub mod runtime;

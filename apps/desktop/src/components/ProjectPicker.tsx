@@ -3,6 +3,7 @@ import type { Project } from '../App';
 
 interface ProjectPickerProps {
   onOpenProject: (path: string) => void;
+  onOpenDemoProject: () => void;
 }
 
 const recentProjects: Project[] = [
@@ -16,7 +17,7 @@ const recentProjects: Project[] = [
   },
 ];
 
-function ProjectPicker({ onOpenProject }: ProjectPickerProps) {
+function ProjectPicker({ onOpenProject, onOpenDemoProject }: ProjectPickerProps) {
   const [isOpening, setIsOpening] = useState(false);
 
   const handleOpenRepository = async () => {
@@ -36,14 +37,22 @@ function ProjectPicker({ onOpenProject }: ProjectPickerProps) {
   return (
     <div className="project-picker">
       <h2>Repo API</h2>
-      <p className="subtitle">Open a repository-aware API workspace.</p>
+      <p className="subtitle">
+        Connect a repository and turn its API into a working, testable environment.
+      </p>
+      <p style={{ color: '#6c757d', marginBottom: '1rem' }}>
+        Discover APIs in source code • Run safe requests • Start a mock API • Validate with tests
+      </p>
 
       <button
         className="action-button"
         onClick={handleOpenRepository}
         disabled={isOpening}
       >
-        {isOpening ? 'Opening...' : 'Open Repository'}
+        {isOpening ? 'Opening...' : 'Connect Repository'}
+      </button>
+      <button className="control-button" onClick={onOpenDemoProject} style={{ marginLeft: '0.75rem' }}>
+        Explore Demo Project
       </button>
 
       <div className="recent-projects">

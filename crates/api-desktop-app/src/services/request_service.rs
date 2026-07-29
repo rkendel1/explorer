@@ -26,7 +26,7 @@ use crate::ValidationResult;
 use crate::state::{DesktopStateManager, RequestHistoryEntry};
 
 use super::vault_service::{AuthenticationConfig, VaultService};
-use super::{ServiceError, ServiceResult};
+use super::{CustomerJourneyService, ServiceError, ServiceResult};
 
 /// Sensitive field names that should be redacted from request/response
 const SENSITIVE_FIELDS: &[&str] = &[
@@ -168,6 +168,24 @@ impl RequestService {
         state
             .add_request_history(&project.name, history_entry)
             .await;
+
+        let _ = CustomerJourneyService::complete_outcome(
+            state,
+            api_customer_journey::JourneyOutcome::FirstRequest,
+        )
+        .await;
+        let _ = CustomerJourneyService::complete_outcome(
+            state,
+            api_customer_journey::JourneyOutcome::ReusableRequest,
+        )
+        .await;
+        if input.environment_id.is_some() {
+            let _ = CustomerJourneyService::complete_outcome(
+                state,
+                api_customer_journey::JourneyOutcome::EnvironmentReady,
+            )
+            .await;
+        }
 
         Ok(ExecuteRequestOutput {
             request_id,

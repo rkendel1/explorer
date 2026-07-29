@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::RecentProject;
 use crate::state::DesktopStateManager;
 
-use super::{ServiceError, ServiceResult};
+use super::{CustomerJourneyService, ServiceError, ServiceResult};
 
 /// Project restoration state for application restart
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +96,22 @@ impl ProjectService {
             let completed = wf.steps.iter().filter(|s| s.completed).count();
             (completed, wf.steps.len())
         });
+
+        let _ = CustomerJourneyService::complete_outcome(
+            state,
+            api_customer_journey::JourneyOutcome::RepositoryConnected,
+        )
+        .await;
+
+        if let Ok(contract) = api_storage::load_effective_contract(&path)
+            && !contract.endpoints.is_empty()
+        {
+            let _ = CustomerJourneyService::complete_outcome(
+                state,
+                api_customer_journey::JourneyOutcome::ApiDiscovered,
+            )
+            .await;
+        }
 
         Ok(ProjectSummary {
             name: project.name,

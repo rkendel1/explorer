@@ -19,10 +19,9 @@ pub fn launch_or_open(
     } else {
         create_project(root, project_name.unwrap_or("Repository API Project"))?
     };
-    let _ = api_customer_journey::load_or_initialize_customer_journey_state(
-        root,
-        project.id.clone(),
-    )?;
+    let mut journey =
+        api_customer_journey::load_or_initialize_customer_journey_state(root, project.id.clone())?;
+    journey.complete_outcome(api_customer_journey::JourneyOutcome::RepositoryConnected);
 
     let workflows = list_workflows(root)?;
     if workflows.is_empty() {
@@ -36,6 +35,10 @@ pub fn launch_or_open(
         Ok(contract) => (contract.endpoints.len(), contract.schemas.schemas.len()),
         Err(_) => (0, 0),
     };
+    if endpoint_count > 0 {
+        journey.complete_outcome(api_customer_journey::JourneyOutcome::ApiDiscovered);
+    }
+    api_customer_journey::save_customer_journey_state(root, &journey)?;
 
     let workflow_count = list_workflows(root)?.len();
 
@@ -58,5 +61,13 @@ mod tests {
         assert_eq!(summary.project.name, "FieldFlow API");
         assert!(summary.workflow_count >= 1);
         assert!(dir.path().join(".repo-api/customer-journey.json").exists());
+        let journey = api_customer_journey::load_customer_journey_state(dir.path())
+            .expect("load journey")
+            .expect("journey exists");
+        assert!(
+            journey
+                .completed_outcomes
+                .contains(&api_customer_journey::JourneyOutcome::RepositoryConnected)
+        );
     }
 }

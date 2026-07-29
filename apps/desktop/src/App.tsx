@@ -71,8 +71,8 @@ function App() {
     try {
       const result = await invoke<{ ok: Project }>('project_open', { path });
       if (result.ok) {
-        setCurrentProject(result.ok);
-        setActiveNav('explorer');
+        setCurrentProject({ ...result.ok, path });
+        setActiveNav('workflows');
       }
     } catch (error) {
       console.error('Failed to open project:', error);
@@ -84,8 +84,19 @@ function App() {
         schemaCount: 18,
         environmentCount: 3,
       });
-      setActiveNav('explorer');
+      setActiveNav('workflows');
     }
+  };
+
+  const handleOpenDemoProject = () => {
+    setCurrentProject({
+      name: 'FieldFlow API',
+      path: '/demo/fieldflow',
+      endpointCount: 42,
+      schemaCount: 18,
+      environmentCount: 3,
+    });
+    setActiveNav('workflows');
   };
 
   const handleCloseProject = () => {
@@ -95,7 +106,12 @@ function App() {
 
   const renderContent = () => {
     if (!currentProject) {
-      return <ProjectPicker onOpenProject={handleOpenProject} />;
+      return (
+        <ProjectPicker
+          onOpenProject={handleOpenProject}
+          onOpenDemoProject={handleOpenDemoProject}
+        />
+      );
     }
 
     switch (activeNav) {
@@ -104,7 +120,7 @@ function App() {
       case 'requests':
         return <Requests project={currentProject} />;
       case 'workflows':
-        return <Workflows project={currentProject} />;
+        return <Workflows project={currentProject} onNavigate={setActiveNav} />;
       case 'tests':
         return <Tests project={currentProject} />;
       case 'runtime':
