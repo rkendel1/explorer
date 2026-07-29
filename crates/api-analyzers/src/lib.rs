@@ -27,7 +27,7 @@ fn normalize_path(path: &str) -> String {
     if !p.starts_with('/') {
         p = format!("/{p}");
     }
-    p.replace(':', "{").replace("{", "{").replace("/", "/")
+    p
 }
 
 fn add_route(
@@ -39,13 +39,7 @@ fn add_route(
     line: usize,
     confidence: Confidence,
 ) {
-    let normalized = path.replace(":", "{").replace("{", "{");
-    let normalized = Regex::new(r"\{([A-Za-z0-9_]+)")
-        .unwrap()
-        .replace_all(&normalized, "{$1")
-        .to_string();
-    let path = normalized.replace("/", "/");
-    let path = path.replace("{", "{").replace("}", "}");
+    // Convert Express-style :param to OpenAPI-style {param}
     let path = Regex::new(r":([A-Za-z0-9_]+)")
         .unwrap()
         .replace_all(&path, "{$1}")
@@ -105,44 +99,44 @@ impl ApiAnalyzer for GenericRouteAnalyzer {
             let text = api_repository::read_file(&context.root, &sf.path)
                 .map_err(|e| AnalyzerError::Generic(e.to_string()))?;
             for (idx, line) in text.lines().enumerate() {
-                if let Some(c) = js_re.captures(line) {
-                    if let Some(m) = method_from_str(&c[1]) {
-                        add_route(
-                            &mut out,
-                            "generic-route",
-                            m,
-                            normalize_path(&c[2]),
-                            sf.path.display().to_string(),
-                            idx + 1,
-                            Confidence::medium(),
-                        );
-                    }
+                if let Some(c) = js_re.captures(line)
+                    && let Some(m) = method_from_str(&c[1])
+                {
+                    add_route(
+                        &mut out,
+                        "generic-route",
+                        m,
+                        normalize_path(&c[2]),
+                        sf.path.display().to_string(),
+                        idx + 1,
+                        Confidence::medium(),
+                    );
                 }
-                if let Some(c) = py_re.captures(line) {
-                    if let Some(m) = method_from_str(&c[1]) {
-                        add_route(
-                            &mut out,
-                            "generic-route",
-                            m,
-                            normalize_path(&c[2]),
-                            sf.path.display().to_string(),
-                            idx + 1,
-                            Confidence::high(),
-                        );
-                    }
+                if let Some(c) = py_re.captures(line)
+                    && let Some(m) = method_from_str(&c[1])
+                {
+                    add_route(
+                        &mut out,
+                        "generic-route",
+                        m,
+                        normalize_path(&c[2]),
+                        sf.path.display().to_string(),
+                        idx + 1,
+                        Confidence::high(),
+                    );
                 }
-                if let Some(c) = axum_re.captures(line) {
-                    if let Some(m) = method_from_str(&c[2]) {
-                        add_route(
-                            &mut out,
-                            "generic-route",
-                            m,
-                            normalize_path(&c[1]),
-                            sf.path.display().to_string(),
-                            idx + 1,
-                            Confidence::medium(),
-                        );
-                    }
+                if let Some(c) = axum_re.captures(line)
+                    && let Some(m) = method_from_str(&c[2])
+                {
+                    add_route(
+                        &mut out,
+                        "generic-route",
+                        m,
+                        normalize_path(&c[1]),
+                        sf.path.display().to_string(),
+                        idx + 1,
+                        Confidence::medium(),
+                    );
                 }
                 if line.contains("format!(") && line.contains("route") {
                     out.diagnostics.push(Diagnostic {

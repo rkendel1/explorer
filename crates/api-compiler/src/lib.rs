@@ -300,10 +300,10 @@ pub fn diff_contracts(before: &ApiContract, after: &ApiContract) -> Vec<(String,
         }
     }
     for (k, b) in before_map {
-        if let Some(a) = after_map.get(&k) {
-            if b.responses.len() != a.responses.len() {
-                out.push((k, DiffKind::Modified));
-            }
+        if let Some(a) = after_map.get(&k)
+            && b.responses.len() != a.responses.len()
+        {
+            out.push((k, DiffKind::Modified));
         }
     }
     if out.is_empty() {
