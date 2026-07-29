@@ -18,14 +18,14 @@ interface SidebarProps {
 }
 
 const navItems: { id: NavigationItem; label: string }[] = [
-  { id: 'explorer', label: 'Explorer' },
+  { id: 'workflows', label: 'Getting Started' },
+  { id: 'explorer', label: 'Your API' },
   { id: 'requests', label: 'Requests' },
-  { id: 'workflows', label: 'Workflows' },
+  { id: 'runtime', label: 'Mock API' },
   { id: 'tests', label: 'Tests' },
-  { id: 'runtime', label: 'Runtime' },
-  { id: 'vault', label: 'Vault' },
-  { id: 'changes', label: 'Changes' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'vault', label: 'Vault (More)' },
+  { id: 'changes', label: 'Contract Changes (More)' },
+  { id: 'settings', label: 'Settings (More)' },
 ];
 
 function Sidebar({ activeNav, onNavigate, project }: SidebarProps) {

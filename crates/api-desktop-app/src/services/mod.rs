@@ -14,6 +14,7 @@
 //! - `api-testing` for API testing
 
 pub mod changes_service;
+pub mod customer_journey_service;
 pub mod environment_service;
 pub mod explorer_service;
 pub mod project_service;
@@ -26,6 +27,7 @@ pub mod vault_service;
 pub mod workflow_service;
 
 pub use changes_service::ChangesService;
+pub use customer_journey_service::CustomerJourneyService;
 pub use environment_service::EnvironmentService;
 pub use explorer_service::ExplorerService;
 pub use project_service::ProjectService;

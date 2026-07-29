@@ -207,10 +207,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "api-customer-journey"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
+]
+
+[[package]]
 name = "api-desktop"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api-customer-journey",
  "api-projects",
  "api-storage",
  "api-vault",
@@ -225,6 +238,7 @@ dependencies = [
  "anyhow",
  "api-client",
  "api-core",
+ "api-customer-journey",
  "api-desktop",
  "api-mock-runtime",
  "api-projects",

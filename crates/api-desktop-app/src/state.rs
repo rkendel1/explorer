@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use api_customer_journey::CustomerJourneyState;
 use api_projects::ApiProject;
 use api_vault::VaultState;
 use api_workflows::Workflow;
@@ -44,6 +45,9 @@ pub struct DesktopStateManager {
 
     /// Request history per project
     pub request_history: RwLock<HashMap<String, Vec<RequestHistoryEntry>>>,
+
+    /// Customer journey state for progressive onboarding
+    pub customer_journey: RwLock<Option<CustomerJourneyState>>,
 }
 
 /// Request history entry (secrets redacted)
@@ -71,6 +75,7 @@ impl DesktopStateManager {
             workflow_engine: RwLock::new(None),
             recent_projects: RwLock::new(Vec::new()),
             request_history: RwLock::new(HashMap::new()),
+            customer_journey: RwLock::new(None),
         }
     }
 
@@ -153,6 +158,13 @@ impl DesktopStateManager {
             *self.workflow_engine.write().await = Some(engine);
         }
 
+        if let Ok(journey) = api_customer_journey::load_or_initialize_customer_journey_state(
+            &path,
+            project.id.clone(),
+        ) {
+            *self.customer_journey.write().await = Some(journey);
+        }
+
         Ok(project)
     }
 
@@ -171,6 +183,7 @@ impl DesktopStateManager {
         *self.project.write().await = None;
         *self.workflows.write().await = Vec::new();
         *self.workflow_engine.write().await = None;
+        *self.customer_journey.write().await = None;
     }
 
     /// Get the vault state
@@ -210,6 +223,32 @@ impl DesktopStateManager {
     pub async fn get_request_history(&self, project_id: &str) -> Vec<RequestHistoryEntry> {
         let history = self.request_history.read().await;
         history.get(project_id).cloned().unwrap_or_default()
+    }
+
+    /// Get or initialize customer journey state for the active project
+    pub async fn get_or_initialize_customer_journey(&self) -> anyhow::Result<CustomerJourneyState> {
+        if let Some(existing) = self.customer_journey.read().await.clone() {
+            return Ok(existing);
+        }
+
+        let active_root = self.active_root.read().await.clone();
+        let project = self.project.read().await.clone();
+        let root = active_root.ok_or_else(|| anyhow::anyhow!("no active project root"))?;
+        let project = project.ok_or_else(|| anyhow::anyhow!("no active project"))?;
+
+        let journey =
+            api_customer_journey::load_or_initialize_customer_journey_state(&root, project.id)?;
+        *self.customer_journey.write().await = Some(journey.clone());
+        Ok(journey)
+    }
+
+    /// Persist customer journey for active project
+    pub async fn save_customer_journey(&self, state: CustomerJourneyState) -> anyhow::Result<()> {
+        let active_root = self.active_root.read().await.clone();
+        let root = active_root.ok_or_else(|| anyhow::anyhow!("no active project root"))?;
+        api_customer_journey::save_customer_journey_state(&root, &state)?;
+        *self.customer_journey.write().await = Some(state);
+        Ok(())
     }
 }
 
@@ -258,5 +297,27 @@ mod tests {
         let history = manager.get_request_history("proj-1").await;
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].method, "GET");
+    }
+
+    #[tokio::test]
+    async fn test_customer_journey_state() {
+        let dir = tempdir().unwrap();
+        let manager = DesktopStateManager::new(dir.path().to_path_buf());
+        let project = api_projects::create_project(dir.path(), "Journey Project").unwrap();
+        *manager.active_root.write().await = Some(dir.path().to_path_buf());
+        *manager.project.write().await = Some(project.clone());
+
+        let mut state = manager.get_or_initialize_customer_journey().await.unwrap();
+        assert_eq!(state.project_id, project.id);
+
+        state.complete_outcome(api_customer_journey::JourneyOutcome::RepositoryConnected);
+        manager.save_customer_journey(state.clone()).await.unwrap();
+
+        let loaded = manager.get_or_initialize_customer_journey().await.unwrap();
+        assert!(
+            loaded
+                .completed_outcomes
+                .contains(&api_customer_journey::JourneyOutcome::RepositoryConnected)
+        );
     }
 }

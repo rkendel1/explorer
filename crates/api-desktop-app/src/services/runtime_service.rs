@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::RuntimeStatus;
 use crate::state::DesktopStateManager;
 
-use super::{ServiceError, ServiceResult};
+use super::{CustomerJourneyService, ServiceError, ServiceResult};
 
 /// Runtime configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +134,11 @@ impl RuntimeService {
             .set_runtime_state(RuntimeStatus::Running, Some(address))
             .await;
         state.update_runtime_metrics(0, 0).await;
+        let _ = CustomerJourneyService::complete_outcome(
+            state,
+            api_customer_journey::JourneyOutcome::MockReady,
+        )
+        .await;
 
         Self::get_status(state).await
     }

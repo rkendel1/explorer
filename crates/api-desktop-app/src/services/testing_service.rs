@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::state::DesktopStateManager;
 use crate::{TestResultDetail, TestSuiteSummary};
 
-use super::{ServiceError, ServiceResult};
+use super::{CustomerJourneyService, ServiceError, ServiceResult};
 
 /// Test run configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +134,7 @@ impl TestingService {
         let suite_id = config.suite_id.unwrap_or_else(|| "default".to_string());
 
         // In production, this would use api-testing to execute tests
-        Ok(TestRunResult {
+        let result = TestRunResult {
             run_id,
             suite_id: suite_id.clone(),
             suite_name: "API Tests".to_string(),
@@ -144,7 +144,15 @@ impl TestingService {
             duration_ms: 0,
             results: Vec::new(),
             timestamp: chrono::Utc::now(),
-        })
+        };
+
+        let _ = CustomerJourneyService::complete_outcome(
+            state,
+            api_customer_journey::JourneyOutcome::TestComplete,
+        )
+        .await;
+
+        Ok(result)
     }
 
     /// Get test result detail
