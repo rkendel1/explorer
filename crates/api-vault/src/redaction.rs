@@ -254,4 +254,92 @@ mod tests {
         // Other auth types are fully redacted
         assert_eq!(redact_auth_header("other-auth"), "[REDACTED]");
     }
+
+    #[test]
+    fn secrets_never_in_redacted_output() {
+        let service = RedactionService::new();
+        let secrets = vec![
+            "super-secret-api-key-12345",
+            "jwt-token-abc.def.ghi",
+            "bearer-token-xyz",
+        ];
+
+        for secret in &secrets {
+            service.register_secret(secret);
+        }
+
+        // Test string redaction
+        let input = format!(
+            "Headers: Authorization: {}, X-API-Key: {}",
+            secrets[2], secrets[0]
+        );
+        let output = service.redact_string(&input);
+        for secret in &secrets {
+            assert!(
+                !output.contains(secret),
+                "Secret {} should not appear in output: {}",
+                secret,
+                output
+            );
+        }
+
+        // Test JSON redaction
+        let json_input = json!({
+            "token": secrets[1],
+            "nested": {
+                "api_key": secrets[0]
+            }
+        });
+        let json_output = service.redact_json(&json_input);
+        let json_str = json_output.to_string();
+        for secret in &secrets {
+            assert!(
+                !json_str.contains(secret),
+                "Secret {} should not appear in JSON: {}",
+                secret,
+                json_str
+            );
+        }
+    }
+
+    #[test]
+    fn deeply_nested_secrets_redacted() {
+        let service = RedactionService::new();
+
+        let input = json!({
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "password": "deep-secret"
+                    }
+                }
+            },
+            "array": [
+                {"api_key": "array-secret"},
+                {"token": "another-array-secret"}
+            ]
+        });
+
+        let output = service.redact_json(&input);
+        let output_str = output.to_string();
+
+        assert!(!output_str.contains("deep-secret"));
+        assert!(!output_str.contains("array-secret"));
+        assert!(!output_str.contains("another-array-secret"));
+    }
+
+    #[test]
+    fn registered_secrets_cleared() {
+        let service = RedactionService::new();
+        service.register_secret("secret-123");
+
+        let before = service.redact_string("Value: secret-123");
+        assert!(before.contains(REDACTED));
+
+        service.clear_secrets();
+
+        // After clearing, the known secrets list is empty
+        let secrets_count = service.known_secrets.read().unwrap().len();
+        assert_eq!(secrets_count, 0);
+    }
 }
