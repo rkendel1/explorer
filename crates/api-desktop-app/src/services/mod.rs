@@ -19,6 +19,8 @@ pub mod explorer_service;
 pub mod project_service;
 pub mod request_service;
 pub mod runtime_service;
+#[cfg(test)]
+mod security_tests;
 pub mod testing_service;
 pub mod vault_service;
 pub mod workflow_service;
