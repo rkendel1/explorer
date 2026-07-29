@@ -28,3 +28,23 @@ fn scan_and_export_openapi_fixture() {
     assert!(status.success());
     assert!(output_file.exists());
 }
+
+#[test]
+fn desktop_open_bootstraps_project_workspace() {
+    let bin = env!("CARGO_BIN_EXE_api-cli");
+    let fixture = repo_root().join("fixtures/openapi-only");
+    let status = Command::new(bin)
+        .args([
+            "desktop",
+            "--repository",
+            fixture.to_str().expect("path"),
+            "--name",
+            "Fixture API",
+        ])
+        .status()
+        .expect("desktop command");
+    assert!(status.success());
+
+    let project_file = fixture.join(".repo-api/project.json");
+    assert!(project_file.exists());
+}

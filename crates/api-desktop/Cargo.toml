@@ -1,0 +1,15 @@
+[package]
+name = "api-desktop"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+api-projects = { path = "../api-projects" }
+api-storage = { path = "../api-storage" }
+api-vault = { path = "../api-vault" }
+api-workflows = { path = "../api-workflows" }
+
+[dev-dependencies]
+tempfile = "3"
