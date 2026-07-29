@@ -1,13 +1,12 @@
 //! Contract change commands
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::ContractChangeSummary;
 use crate::state::DesktopStateManager;
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Review change request
 #[derive(Debug, Deserialize)]
@@ -43,7 +42,7 @@ pub struct RejectChangeRequest {
 
 /// List contract changes
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn change_list(state: Arc<DesktopStateManager>) -> CommandResult<ContractChangeSummary> {
+pub async fn change_list(state: AppState<'_>) -> CommandResult<ContractChangeSummary> {
     let project = state.project.read().await;
 
     if project.is_none() {
@@ -62,7 +61,7 @@ pub async fn change_list(state: Arc<DesktopStateManager>) -> CommandResult<Contr
 /// Review a specific change
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_review(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: ReviewChangeRequest,
 ) -> CommandResult<ChangeDetail> {
     let project = state.project.read().await;
@@ -77,7 +76,7 @@ pub async fn change_review(
 /// Accept a change (update effective contract)
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_accept(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: AcceptChangeRequest,
 ) -> CommandResult<()> {
     let project = state.project.read().await;
@@ -92,7 +91,7 @@ pub async fn change_accept(
 /// Reject a change (keep current contract)
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_reject(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: RejectChangeRequest,
 ) -> CommandResult<()> {
     let project = state.project.read().await;
@@ -106,7 +105,7 @@ pub async fn change_reject(
 
 /// Accept all changes
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn change_accept_all(state: Arc<DesktopStateManager>) -> CommandResult<usize> {
+pub async fn change_accept_all(state: AppState<'_>) -> CommandResult<usize> {
     let project = state.project.read().await;
 
     if project.is_none() {
@@ -118,7 +117,7 @@ pub async fn change_accept_all(state: Arc<DesktopStateManager>) -> CommandResult
 
 /// Keep current contract (reject all changes)
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn change_keep_current(state: Arc<DesktopStateManager>) -> CommandResult<usize> {
+pub async fn change_keep_current(state: AppState<'_>) -> CommandResult<usize> {
     let project = state.project.read().await;
 
     if project.is_none() {

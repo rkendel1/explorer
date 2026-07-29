@@ -1,7 +1,6 @@
 //! Request execution commands
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::Utc;
@@ -11,7 +10,7 @@ use uuid::Uuid;
 use crate::state::{DesktopStateManager, RequestHistoryEntry};
 use crate::{RequestResult, ValidationResult};
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Execute request input
 #[derive(Debug, Deserialize)]
@@ -51,7 +50,7 @@ pub struct DeleteRequestInput {
 /// Execute a request
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_execute(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: ExecuteRequestInput,
 ) -> CommandResult<RequestResult> {
     let project = state.project.read().await;
@@ -105,7 +104,7 @@ pub async fn request_execute(
 /// Save a request for later
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_save(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: SaveRequestInput,
 ) -> CommandResult<SavedRequest> {
     let project = state.project.read().await;
@@ -127,7 +126,7 @@ pub async fn request_save(
 /// Get request history
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_history(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<Vec<RequestHistoryEntry>> {
     let project = state.project.read().await;
 
@@ -142,7 +141,7 @@ pub async fn request_history(
 /// Delete a request from history
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_delete(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: DeleteRequestInput,
 ) -> CommandResult<()> {
     let project = state.project.read().await;
@@ -160,7 +159,7 @@ pub async fn request_delete(
 
 /// Clear all request history for the current project
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn request_history_clear(state: Arc<DesktopStateManager>) -> CommandResult<()> {
+pub async fn request_history_clear(state: AppState<'_>) -> CommandResult<()> {
     let project = state.project.read().await;
 
     if let Some(project) = project.as_ref() {

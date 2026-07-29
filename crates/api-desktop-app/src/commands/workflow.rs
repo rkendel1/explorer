@@ -1,6 +1,5 @@
 //! Workflow commands
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +9,7 @@ use api_workflows::events::WorkflowEventKind;
 use crate::WorkflowStepSummary;
 use crate::state::DesktopStateManager;
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Workflow summary
 #[derive(Debug, Clone, Serialize)]
@@ -73,7 +72,7 @@ fn action_to_string(action: &WorkflowAction) -> String {
 
 /// List workflows
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn workflow_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<WorkflowSummary>> {
+pub async fn workflow_list(state: AppState<'_>) -> CommandResult<Vec<WorkflowSummary>> {
     let workflows = state.workflows.read().await;
 
     let summaries: Vec<WorkflowSummary> = workflows
@@ -102,7 +101,7 @@ pub async fn workflow_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec
 /// Get workflow details
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_get(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: GetWorkflowRequest,
 ) -> CommandResult<WorkflowDetail> {
     let workflows = state.workflows.read().await;
@@ -132,7 +131,7 @@ pub async fn workflow_get(
 /// Start a workflow
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_start(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: GetWorkflowRequest,
 ) -> CommandResult<WorkflowDetail> {
     workflow_get(state, request).await
@@ -141,7 +140,7 @@ pub async fn workflow_start(
 /// Resume a workflow from where it left off
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_resume(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: ResumeWorkflowRequest,
 ) -> CommandResult<WorkflowDetail> {
     workflow_get(state, GetWorkflowRequest { id: request.id }).await
@@ -150,7 +149,7 @@ pub async fn workflow_resume(
 /// Handle a workflow event (for automatic step completion)
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_handle_event(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: WorkflowEventRequest,
 ) -> CommandResult<Vec<String>> {
     let mut workflows = state.workflows.write().await;

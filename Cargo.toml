@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "apps/desktop/src-tauri",
   "crates/api-cli",
   "crates/api-core",
   "crates/api-repository",

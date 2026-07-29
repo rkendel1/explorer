@@ -1,13 +1,12 @@
 //! Contract and endpoint commands
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::DesktopStateManager;
 use crate::{EndpointDetail, EndpointSummary, EvidenceInfo, ParameterInfo, ResponseInfo};
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Get endpoint request
 #[derive(Debug, Deserialize)]
@@ -39,7 +38,7 @@ pub struct ContractResponse {
 
 /// List all endpoints
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn endpoint_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<EndpointSummary>> {
+pub async fn endpoint_list(state: AppState<'_>) -> CommandResult<Vec<EndpointSummary>> {
     let project = state.project.read().await;
 
     if let Some(project) = project.as_ref() {
@@ -72,7 +71,7 @@ pub async fn endpoint_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec
 /// Get endpoint details
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn endpoint_get(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: GetEndpointRequest,
 ) -> CommandResult<EndpointDetail> {
     let project = state.project.read().await;
@@ -113,7 +112,7 @@ pub async fn endpoint_get(
 
 /// List all schemas
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn schema_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<SchemaSummary>> {
+pub async fn schema_list(state: AppState<'_>) -> CommandResult<Vec<SchemaSummary>> {
     let project = state.project.read().await;
 
     if project.is_none() {
@@ -132,7 +131,7 @@ pub async fn schema_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<S
 /// Get the current contract
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn contract_get(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: GetContractRequest,
 ) -> CommandResult<ContractResponse> {
     let project = state.project.read().await;

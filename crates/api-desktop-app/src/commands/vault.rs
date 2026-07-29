@@ -1,6 +1,5 @@
 //! Vault commands
 
-use std::sync::Arc;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -11,7 +10,7 @@ use api_vault::VaultState;
 use crate::VaultEntryMetadata;
 use crate::state::DesktopStateManager;
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Create vault entry request
 #[derive(Debug, Deserialize)]
@@ -64,7 +63,7 @@ pub struct RevealSecretResponse {
 
 /// List vault entries
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn vault_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<VaultEntryMetadata>> {
+pub async fn vault_list(state: AppState<'_>) -> CommandResult<Vec<VaultEntryMetadata>> {
     let project = state.project.read().await;
 
     if project.is_none() {
@@ -77,7 +76,7 @@ pub async fn vault_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<Va
 /// Create a vault entry
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_create(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: CreateVaultEntryRequest,
 ) -> CommandResult<VaultEntryMetadata> {
     let project = state.project.read().await;
@@ -106,7 +105,7 @@ pub async fn vault_create(
 /// Update a vault entry
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_update(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: UpdateVaultEntryRequest,
 ) -> CommandResult<VaultEntryMetadata> {
     let project = state.project.read().await;
@@ -135,7 +134,7 @@ pub async fn vault_update(
 /// Delete a vault entry
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_delete(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: DeleteVaultEntryRequest,
 ) -> CommandResult<()> {
     let project = state.project.read().await;
@@ -154,7 +153,7 @@ pub async fn vault_delete(
 /// Unlock the vault
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_unlock(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: UnlockVaultRequest,
 ) -> CommandResult<VaultStateResponse> {
     // In production, this would derive key from keychain or passphrase
@@ -168,7 +167,7 @@ pub async fn vault_unlock(
 
 /// Lock the vault
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn vault_lock(state: Arc<DesktopStateManager>) -> CommandResult<VaultStateResponse> {
+pub async fn vault_lock(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
     state.set_vault_state(VaultState::Locked).await;
 
     CommandResult::ok(VaultStateResponse {
@@ -179,7 +178,7 @@ pub async fn vault_lock(state: Arc<DesktopStateManager>) -> CommandResult<VaultS
 
 /// Get vault state
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn vault_state(state: Arc<DesktopStateManager>) -> CommandResult<VaultStateResponse> {
+pub async fn vault_state(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
     let vault_state = state.get_vault_state().await;
 
     CommandResult::ok(VaultStateResponse {
@@ -200,7 +199,7 @@ pub async fn vault_state(state: Arc<DesktopStateManager>) -> CommandResult<Vault
 /// Reveal a secret value (requires unlocked vault)
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_reveal(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: RevealSecretRequest,
 ) -> CommandResult<RevealSecretResponse> {
     let project = state.project.read().await;

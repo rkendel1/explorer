@@ -1,13 +1,12 @@
 //! Runtime commands for mock server control
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::DesktopStateManager;
 use crate::{RuntimeState, RuntimeStatus};
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Runtime status response
 #[derive(Debug, Clone, Serialize)]
@@ -78,7 +77,7 @@ pub struct ImportRuntimeStateRequest {
 /// Get runtime status
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_status(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
     let runtime = state.runtime.read().await;
     CommandResult::ok(RuntimeStatusResponse::from(&*runtime))
@@ -87,7 +86,7 @@ pub async fn runtime_status(
 /// Start the mock runtime
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_start(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: StartRuntimeRequest,
 ) -> CommandResult<RuntimeStatusResponse> {
     let project = state.project.read().await;
@@ -110,7 +109,7 @@ pub async fn runtime_start(
 
 /// Stop the mock runtime
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn runtime_stop(state: Arc<DesktopStateManager>) -> CommandResult<RuntimeStatusResponse> {
+pub async fn runtime_stop(state: AppState<'_>) -> CommandResult<RuntimeStatusResponse> {
     state.set_runtime_state(RuntimeStatus::Stopped, None).await;
 
     let runtime = state.runtime.read().await;
@@ -120,7 +119,7 @@ pub async fn runtime_stop(state: Arc<DesktopStateManager>) -> CommandResult<Runt
 /// Restart the mock runtime
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_restart(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
     let runtime = state.runtime.read().await;
     let address = runtime.address.clone();
@@ -141,7 +140,7 @@ pub async fn runtime_restart(
 /// Reset runtime state (clear all mock state)
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_reset(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
     state.update_runtime_metrics(0, 0).await;
 
@@ -152,7 +151,7 @@ pub async fn runtime_reset(
 /// Get runtime events
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_events(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: GetRuntimeEventsRequest,
 ) -> CommandResult<Vec<RuntimeEvent>> {
     let project = state.project.read().await;
@@ -166,7 +165,7 @@ pub async fn runtime_events(
 
 /// Get runtime metrics
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn runtime_metrics(state: Arc<DesktopStateManager>) -> CommandResult<RuntimeMetrics> {
+pub async fn runtime_metrics(state: AppState<'_>) -> CommandResult<RuntimeMetrics> {
     let runtime = state.runtime.read().await;
 
     CommandResult::ok(RuntimeMetrics {
@@ -180,7 +179,7 @@ pub async fn runtime_metrics(state: Arc<DesktopStateManager>) -> CommandResult<R
 /// Export runtime state
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_export_state(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<serde_json::Value> {
     let project = state.project.read().await;
 
@@ -197,7 +196,7 @@ pub async fn runtime_export_state(
 /// Import runtime state
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_import_state(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: ImportRuntimeStateRequest,
 ) -> CommandResult<()> {
     let project = state.project.read().await;

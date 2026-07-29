@@ -1,13 +1,12 @@
 //! Test execution commands
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::DesktopStateManager;
 use crate::{TestResultDetail, TestSuiteSummary};
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Run tests request
 #[derive(Debug, Deserialize)]
@@ -41,7 +40,7 @@ pub struct ExportTestResultsRequest {
 
 /// List test suites
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn test_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<TestSuiteSummary>> {
+pub async fn test_list(state: AppState<'_>) -> CommandResult<Vec<TestSuiteSummary>> {
     let project = state.project.read().await;
 
     if project.is_none() {
@@ -54,7 +53,7 @@ pub async fn test_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<Tes
 /// Run tests
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_run(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: RunTestsRequest,
 ) -> CommandResult<RunTestsResponse> {
     let project = state.project.read().await;
@@ -77,7 +76,7 @@ pub async fn test_run(
 /// Get test result details
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_result(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     _request: GetTestResultRequest,
 ) -> CommandResult<TestResultDetail> {
     let project = state.project.read().await;
@@ -92,7 +91,7 @@ pub async fn test_result(
 /// Export test results
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_export(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: ExportTestResultsRequest,
 ) -> CommandResult<String> {
     let project = state.project.read().await;

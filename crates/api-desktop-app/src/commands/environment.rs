@@ -1,12 +1,11 @@
 //! Environment commands
 
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::DesktopStateManager;
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Environment summary
 #[derive(Debug, Clone, Serialize)]
@@ -44,7 +43,7 @@ pub struct DeleteEnvironmentRequest {
 /// List all environments
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_list(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
 ) -> CommandResult<Vec<EnvironmentSummary>> {
     let project = state.project.read().await;
     let active_env = state.active_environment.read().await;
@@ -69,7 +68,7 @@ pub async fn environment_list(
 /// Select an environment
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_select(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: SelectEnvironmentRequest,
 ) -> CommandResult<EnvironmentSummary> {
     let project = state.project.read().await;
@@ -94,7 +93,7 @@ pub async fn environment_select(
 /// Update an environment
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_update(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: UpdateEnvironmentRequest,
 ) -> CommandResult<EnvironmentSummary> {
     let mut project = state.project.write().await;
@@ -126,7 +125,7 @@ pub async fn environment_update(
 /// Create a new environment
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_create(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: CreateEnvironmentRequest,
 ) -> CommandResult<EnvironmentSummary> {
     let mut project = state.project.write().await;
@@ -154,7 +153,7 @@ pub async fn environment_create(
 /// Delete an environment
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_delete(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: DeleteEnvironmentRequest,
 ) -> CommandResult<()> {
     let mut project = state.project.write().await;

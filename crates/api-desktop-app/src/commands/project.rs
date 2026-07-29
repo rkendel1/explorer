@@ -1,14 +1,13 @@
 //! Project commands
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::RecentProject;
 use crate::state::DesktopStateManager;
 
-use super::CommandResult;
+use super::{AppState, CommandResult};
 
 /// Open project request
 #[derive(Debug, Deserialize)]
@@ -33,7 +32,7 @@ pub struct CreateProjectRequest {
 
 /// List recent projects
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn project_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<RecentProject>> {
+pub async fn project_list(state: AppState<'_>) -> CommandResult<Vec<RecentProject>> {
     match state.load_recent_projects().await {
         Ok(projects) => CommandResult::ok(projects),
         Err(e) => CommandResult::error(e.to_string()),
@@ -43,7 +42,7 @@ pub async fn project_list(state: Arc<DesktopStateManager>) -> CommandResult<Vec<
 /// Open a project at the given path
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_open(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: OpenProjectRequest,
 ) -> CommandResult<OpenProjectResponse> {
     let path = PathBuf::from(&request.path);
@@ -64,7 +63,7 @@ pub async fn project_open(
 /// Create a new project
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_create(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     request: CreateProjectRequest,
 ) -> CommandResult<OpenProjectResponse> {
     let path = PathBuf::from(&request.path);
@@ -85,7 +84,7 @@ pub async fn project_create(
 
 /// Close the current project
 #[cfg_attr(feature = "tauri", tauri::command)]
-pub async fn project_close(state: Arc<DesktopStateManager>) -> CommandResult<()> {
+pub async fn project_close(state: AppState<'_>) -> CommandResult<()> {
     state.close_project().await;
     CommandResult::ok(())
 }
@@ -93,7 +92,7 @@ pub async fn project_close(state: Arc<DesktopStateManager>) -> CommandResult<()>
 /// Remove a recent project from the list
 #[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_remove_recent(
-    state: Arc<DesktopStateManager>,
+    state: AppState<'_>,
     path: String,
 ) -> CommandResult<()> {
     let path = PathBuf::from(&path);

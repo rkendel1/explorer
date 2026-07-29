@@ -13,6 +13,11 @@ pub mod test;
 pub mod vault;
 pub mod workflow;
 
+#[cfg(feature = "tauri")]
+pub type AppState<'a> = tauri::State<'a, std::sync::Arc<crate::state::DesktopStateManager>>;
+#[cfg(not(feature = "tauri"))]
+pub type AppState<'a> = std::sync::Arc<crate::state::DesktopStateManager>;
+
 use serde::{Deserialize, Serialize};
 
 /// Common command result wrapper

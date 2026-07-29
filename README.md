@@ -2,6 +2,20 @@
 
 `repo-api` scans a repository for API evidence, compiles a canonical contract, exports OpenAPI and request collections, and runs a mock server.
 
+## Start The Full Platform (Backend + Desktop)
+
+Run this from the repository root:
+
+```bash
+./scripts/dev-platform.sh
+```
+
+This command starts:
+- The mock backend on `http://127.0.0.1:4010`
+- The Tauri desktop app in dev mode
+
+Use `Ctrl+C` once to stop both processes.
+
 ## Workflow
 
 ```bash

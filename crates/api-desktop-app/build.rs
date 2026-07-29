@@ -1,4 +1,3 @@
 fn main() {
-    #[cfg(feature = "tauri")]
-    tauri_build::build();
+    // Tauri build-time config is owned by apps/desktop/src-tauri.
 }
