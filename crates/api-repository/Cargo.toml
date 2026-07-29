@@ -1,0 +1,14 @@
+[package]
+name = "api-repository"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+api-core = { path = "../api-core" }
+chrono.workspace = true
+ignore.workspace = true
+serde.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+anyhow.workspace = true
