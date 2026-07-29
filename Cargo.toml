@@ -9,6 +9,10 @@ members = [
   "crates/api-mock-runtime",
   "crates/api-client",
   "crates/api-storage",
+  "crates/api-runtime-events",
+  "crates/api-watch",
+  "crates/api-testing",
+  "crates/api-workbench",
 ]
 resolver = "2"
 
@@ -20,10 +24,12 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
+async-stream = "0.3"
 axum = { version = "0.8", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
+notify = "8"
 rand = "0.9"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -33,4 +39,5 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
 uuid = { version = "1", features = ["serde", "v4"] }
