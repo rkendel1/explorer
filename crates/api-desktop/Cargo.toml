@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+api-customer-journey = { path = "../api-customer-journey" }
 api-projects = { path = "../api-projects" }
 api-storage = { path = "../api-storage" }
 api-vault = { path = "../api-vault" }

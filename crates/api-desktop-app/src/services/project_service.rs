@@ -81,6 +81,11 @@ impl ProjectService {
         // Store the root and project
         *state.active_root.write().await = Some(path.clone());
         *state.project.write().await = Some(project.clone());
+        let _ = api_customer_journey::load_or_initialize_customer_journey_state(
+            &path,
+            project.id.clone(),
+        )
+        .map_err(|e| ServiceError::internal(&e.to_string()))?;
 
         // Add to recent projects
         Self::add_to_recent_projects(state, path.clone(), project.name.clone()).await;
@@ -323,6 +328,12 @@ mod tests {
 
         assert!(!summary.name.is_empty());
         assert!(state.project.read().await.is_some());
+        assert!(
+            project_dir
+                .path()
+                .join(".repo-api/customer-journey.json")
+                .exists()
+        );
 
         // Close project
         ProjectService::close_project(&state).await.unwrap();

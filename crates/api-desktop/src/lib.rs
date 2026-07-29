@@ -19,6 +19,10 @@ pub fn launch_or_open(
     } else {
         create_project(root, project_name.unwrap_or("Repository API Project"))?
     };
+    let _ = api_customer_journey::load_or_initialize_customer_journey_state(
+        root,
+        project.id.clone(),
+    )?;
 
     let workflows = list_workflows(root)?;
     if workflows.is_empty() {
@@ -53,5 +57,6 @@ mod tests {
         let summary = launch_or_open(dir.path(), Some("FieldFlow API")).expect("launch");
         assert_eq!(summary.project.name, "FieldFlow API");
         assert!(summary.workflow_count >= 1);
+        assert!(dir.path().join(".repo-api/customer-journey.json").exists());
     }
 }

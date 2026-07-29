@@ -12,6 +12,7 @@ tauri = ["dep:tauri"]
 anyhow.workspace = true
 api-client = { path = "../api-client" }
 api-core = { path = "../api-core" }
+api-customer-journey = { path = "../api-customer-journey" }
 api-desktop = { path = "../api-desktop" }
 api-mock-runtime = { path = "../api-mock-runtime" }
 api-projects = { path = "../api-projects" }
