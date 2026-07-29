@@ -52,12 +52,12 @@ pub fn validate_request(endpoint: &api_core::ApiEndpoint, body: Option<&Value>) 
     }
     if let Some(Value::Object(obj)) = body {
         for rb in &endpoint.request_bodies {
-            if rb.required {
-                if let Some(Value::Object(example_obj)) = &rb.example {
-                    for key in example_obj.keys() {
-                        if !obj.contains_key(key) {
-                            violations.push(json!({"location":format!("body.{key}"),"rule":"required","expected":"property"}));
-                        }
+            if rb.required
+                && let Some(Value::Object(example_obj)) = &rb.example
+            {
+                for key in example_obj.keys() {
+                    if !obj.contains_key(key) {
+                        violations.push(json!({"location":format!("body.{key}"),"rule":"required","expected":"property"}));
                     }
                 }
             }
@@ -118,12 +118,10 @@ pub fn resolve_response(
         .endpoints
         .iter()
         .find(|e| &e.method == method && e.path == path)
+        && let Some(r) = ep.responses.first()
+        && let Some(example) = &r.example
     {
-        if let Some(r) = ep.responses.first() {
-            if let Some(example) = &r.example {
-                return (r.status, example.clone());
-            }
-        }
+        return (r.status, example.clone());
     }
 
     let mut rng = StdRng::seed_from_u64(state.seed);
@@ -132,14 +130,13 @@ pub fn resolve_response(
         .endpoints
         .iter()
         .find(|e| &e.method == method && e.path == path)
+        && let Some(resp) = ep.responses.first()
     {
-        if let Some(resp) = ep.responses.first() {
-            let schema = resp
-                .schema
-                .as_ref()
-                .and_then(|s| state.contract.schemas.schemas.get(&s.id));
-            return (resp.status, generated_value(schema, &mut rng));
-        }
+        let schema = resp
+            .schema
+            .as_ref()
+            .and_then(|s| state.contract.schemas.schemas.get(&s.id));
+        return (resp.status, generated_value(schema, &mut rng));
     }
 
     (200, json!({"status":"ok"}))

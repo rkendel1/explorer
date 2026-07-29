@@ -5,7 +5,7 @@ use api_compiler::{
 use api_core::{ApiMetadata, ApiToolError, HttpMethod, SchemaRegistry};
 use api_discovery::{DiscoveryEngine, build_context};
 use clap::{Parser, Subcommand};
-use std::{fs, net::SocketAddr, path::PathBuf};
+use std::{fs, net::SocketAddr, path::{Path, PathBuf}};
 
 #[derive(Parser)]
 #[command(name = "repo-api")]
@@ -72,9 +72,9 @@ enum ExportCommands {
     },
 }
 
-async fn scan_contract(repository: &PathBuf) -> anyhow::Result<api_core::ApiContract> {
+async fn scan_contract(repository: &Path) -> anyhow::Result<api_core::ApiContract> {
     api_storage::init_layout(repository)?;
-    let context = build_context(repository.clone())?;
+    let context = build_context(repository.to_path_buf())?;
 
     let mut engine = DiscoveryEngine::default();
     for analyzer in default_analyzers() {
