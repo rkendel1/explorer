@@ -12,7 +12,7 @@ members = [
   "crates/api-runtime-events",
   "crates/api-watch",
   "crates/api-testing",
-  "crates/api-workbench", "crates/api-projects", "crates/api-workflows", "crates/api-vault", "crates/api-desktop",
+  "crates/api-workbench", "crates/api-projects", "crates/api-workflows", "crates/api-vault", "crates/api-desktop", "crates/api-desktop-app",
 ]
 resolver = "2"
 

@@ -8,9 +8,9 @@
 //! - Watch lifecycle
 //! - Repository synchronization events
 
-use api_compiler::{compile_contract, diff_contracts, DiffKind};
+use api_compiler::{DiffKind, compile_contract, diff_contracts};
 use api_core::{ApiContract, ApiMetadata, SchemaRegistry};
-use api_discovery::{build_context, DiscoveryEngine};
+use api_discovery::{DiscoveryEngine, build_context};
 use api_runtime_events::EventEmitter;
 use chrono::{DateTime, Utc};
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -22,7 +22,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use tokio::sync::{broadcast, mpsc, RwLock};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use uuid::Uuid;
 
 pub type ChangeSetId = String;
@@ -79,7 +79,11 @@ impl ContractRevision {
         }
     }
 
-    pub fn from_contract(contract: &ApiContract, snapshot_id: &str, parent: Option<String>) -> Self {
+    pub fn from_contract(
+        contract: &ApiContract,
+        snapshot_id: &str,
+        parent: Option<String>,
+    ) -> Self {
         let hash = compute_contract_hash(contract);
         Self::new(snapshot_id, hash, parent)
     }
@@ -157,9 +161,9 @@ impl ContractChangeSet {
     }
 
     pub fn has_override_conflicts(&self) -> bool {
-        self.override_impacts
-            .iter()
-            .any(|i| i.outcome == OverrideOutcome::RequiresReview || i.outcome == OverrideOutcome::Orphaned)
+        self.override_impacts.iter().any(|i| {
+            i.outcome == OverrideOutcome::RequiresReview || i.outcome == OverrideOutcome::Orphaned
+        })
     }
 }
 
@@ -298,6 +302,7 @@ pub enum WatchEvent {
 }
 
 /// Repository watcher state
+#[allow(dead_code)]
 pub struct RepositoryWatcher {
     root: PathBuf,
     config: WatchConfig,
@@ -406,7 +411,7 @@ impl RepositoryWatcher {
         );
 
         let revision = ContractRevision::from_contract(&contract, &context.snapshot.id, None);
-        
+
         // Save to storage
         api_storage::init_layout(&self.root)?;
         api_storage::save_generated_contract(&self.root, &contract)?;
@@ -493,9 +498,15 @@ impl RepositoryWatcher {
                     .filter(|(k, _)| k != "no-change")
                     .map(|(key, kind)| {
                         let categories = match kind {
-                            DiffKind::Added => vec![ChangeCategory::EndpointAdded, ChangeCategory::NonBreaking],
-                            DiffKind::Removed => vec![ChangeCategory::EndpointRemoved, ChangeCategory::Breaking],
-                            DiffKind::Modified => vec![ChangeCategory::EndpointModified, ChangeCategory::Uncertain],
+                            DiffKind::Added => {
+                                vec![ChangeCategory::EndpointAdded, ChangeCategory::NonBreaking]
+                            }
+                            DiffKind::Removed => {
+                                vec![ChangeCategory::EndpointRemoved, ChangeCategory::Breaking]
+                            }
+                            DiffKind::Modified => {
+                                vec![ChangeCategory::EndpointModified, ChangeCategory::Uncertain]
+                            }
                             DiffKind::Breaking => vec![ChangeCategory::Breaking],
                             DiffKind::NonBreaking => vec![ChangeCategory::NonBreaking],
                             DiffKind::Uncertain => vec![ChangeCategory::Uncertain],
@@ -509,16 +520,28 @@ impl RepositoryWatcher {
                     .collect();
 
                 let change_set = ContractChangeSet::new(
-                    &previous_revision.as_ref().map(|r| r.id.clone()).unwrap_or_default(),
+                    &previous_revision
+                        .as_ref()
+                        .map(|r| r.id.clone())
+                        .unwrap_or_default(),
                     &new_revision.id,
                     changes.clone(),
                     vec![],
                 );
 
                 let breaking = change_set.has_breaking_changes();
-                let added = changes.iter().filter(|c| c.categories.contains(&ChangeCategory::EndpointAdded)).count();
-                let modified = changes.iter().filter(|c| c.categories.contains(&ChangeCategory::EndpointModified)).count();
-                let removed = changes.iter().filter(|c| c.categories.contains(&ChangeCategory::EndpointRemoved)).count();
+                let added = changes
+                    .iter()
+                    .filter(|c| c.categories.contains(&ChangeCategory::EndpointAdded))
+                    .count();
+                let modified = changes
+                    .iter()
+                    .filter(|c| c.categories.contains(&ChangeCategory::EndpointModified))
+                    .count();
+                let removed = changes
+                    .iter()
+                    .filter(|c| c.categories.contains(&ChangeCategory::EndpointRemoved))
+                    .count();
 
                 self.emit_event(WatchEvent::ContractChanged {
                     change_set_id: change_set.id.clone(),
@@ -578,11 +601,10 @@ impl RepositoryWatcher {
 
         if let Some(mut cs) = change_set {
             // Load the generated contract and make it effective
-            let contract = api_storage::load_effective_contract(&self.root)
-                .or_else(|_| {
-                    let data = std::fs::read(self.root.join(".repo-api/contract/generated.json"))?;
-                    serde_json::from_slice(&data).map_err(anyhow::Error::from)
-                })?;
+            let contract = api_storage::load_effective_contract(&self.root).or_else(|_| {
+                let data = std::fs::read(self.root.join(".repo-api/contract/generated.json"))?;
+                serde_json::from_slice(&data).map_err(anyhow::Error::from)
+            })?;
 
             // Apply overrides
             let overrides = api_storage::load_overrides(&self.root)?;
@@ -712,7 +734,7 @@ impl RepositoryWatcher {
 
 fn should_watch_file(path: &Path) -> bool {
     let path_str = path.to_string_lossy();
-    
+
     // Ignore common non-source directories
     if path_str.contains("node_modules")
         || path_str.contains("target")
@@ -732,6 +754,7 @@ fn should_watch_file(path: &Path) -> bool {
     )
 }
 
+#[allow(dead_code)]
 fn classify_file_change(path: &Path) -> FileChangeType {
     let name = path
         .file_name()
@@ -746,8 +769,12 @@ fn classify_file_change(path: &Path) -> FileChangeType {
     }
 
     // Check filename or path contains route indicators
-    if name.contains("route") || name.contains("router") || name.contains("endpoint")
-        || path_str.contains("/routes/") || path_str.contains("/router/") || path_str.contains("/endpoints/")
+    if name.contains("route")
+        || name.contains("router")
+        || name.contains("endpoint")
+        || path_str.contains("/routes/")
+        || path_str.contains("/router/")
+        || path_str.contains("/endpoints/")
     {
         return FileChangeType::RouteFile;
     }
@@ -821,7 +848,7 @@ mod tests {
             PathBuf::from("handler.ts"),
             vec![PathBuf::from("schema.ts")],
         );
-        
+
         let affected = graph.get_affected_files(&[PathBuf::from("schema.ts")]);
         assert!(affected.contains(&PathBuf::from("schema.ts")));
         assert!(affected.contains(&PathBuf::from("handler.ts")));

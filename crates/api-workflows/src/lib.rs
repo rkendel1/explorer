@@ -1,4 +1,18 @@
+//! Guided workflow system for API development.
+//!
+//! This crate provides:
+//! - Workflow definitions with steps
+//! - Workflow persistence
+//! - Event-driven step completion
+//! - Workflow recovery on restart
+
+pub mod events;
+
 use chrono::{DateTime, Utc};
+pub use events::{
+    CompletionPredicate, CompletionResult, WorkflowCompletionEngine, WorkflowCompletionRule,
+    WorkflowEvent, WorkflowEventKind, default_completion_rules,
+};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 use uuid::Uuid;
@@ -119,6 +133,27 @@ pub fn starter_workflow_steps() -> Vec<WorkflowStep> {
             action: WorkflowAction::RunFirstRequest,
             completed: false,
         },
+        WorkflowStep {
+            id: "configure-authentication".into(),
+            title: "Configure Authentication".into(),
+            description: "Set up API key or bearer token authentication.".into(),
+            action: WorkflowAction::ConfigureEnvironment,
+            completed: false,
+        },
+        WorkflowStep {
+            id: "create-mock-scenario".into(),
+            title: "Create Mock Scenario".into(),
+            description: "Create a custom mock response scenario.".into(),
+            action: WorkflowAction::CreateMockScenario,
+            completed: false,
+        },
+        WorkflowStep {
+            id: "run-test-suite".into(),
+            title: "Run Test Suite".into(),
+            description: "Execute the API test suite and review results.".into(),
+            action: WorkflowAction::RunTestSuite,
+            completed: false,
+        },
     ]
 }
 
@@ -144,5 +179,17 @@ mod tests {
                 .iter()
                 .any(|s| s.id == "analyze-api" && s.completed)
         );
+    }
+
+    #[test]
+    fn starter_workflow_has_all_steps() {
+        let steps = starter_workflow_steps();
+        assert_eq!(steps.len(), 6);
+        assert!(steps.iter().any(|s| s.id == "connect-repository"));
+        assert!(steps.iter().any(|s| s.id == "analyze-api"));
+        assert!(steps.iter().any(|s| s.id == "run-first-request"));
+        assert!(steps.iter().any(|s| s.id == "configure-authentication"));
+        assert!(steps.iter().any(|s| s.id == "create-mock-scenario"));
+        assert!(steps.iter().any(|s| s.id == "run-test-suite"));
     }
 }

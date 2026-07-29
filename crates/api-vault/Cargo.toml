@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 aes-gcm = "0.10"
 anyhow.workspace = true
+argon2 = "0.5"
 base64 = "0.22"
 chrono.workspace = true
 keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "linux-native"] }
@@ -14,7 +15,10 @@ rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 uuid.workspace = true
+zeroize = "1"
 
 [dev-dependencies]
 tempfile = "3"

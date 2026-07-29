@@ -1,7 +1,10 @@
+#![allow(clippy::collapsible_if)]
+#![allow(clippy::op_ref)]
+#![allow(clippy::unnecessary_sort_by)]
+#![allow(dead_code)]
+
 use api_core::{ApiContract, ApiSchema, HttpMethod, StringSchema};
-use api_runtime_events::{
-    EventEmitter, ResponseSource, StateOperation, ValidationViolation,
-};
+use api_runtime_events::{EventEmitter, ResponseSource, StateOperation, ValidationViolation};
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -10,16 +13,11 @@ use axum::{
     routing::any,
 };
 use chrono::Utc;
-use rand::{SeedableRng, rngs::StdRng, Rng};
+use rand::{Rng, SeedableRng, rngs::StdRng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
@@ -169,7 +167,12 @@ pub struct RuntimeState {
 }
 
 impl RuntimeState {
-    pub fn new(contract: ApiContract, seed: u64, scenarios: Vec<MockScenario>, stateful: bool) -> Self {
+    pub fn new(
+        contract: ApiContract,
+        seed: u64,
+        scenarios: Vec<MockScenario>,
+        stateful: bool,
+    ) -> Self {
         Self {
             contract: Arc::new(contract),
             seed,
@@ -217,7 +220,7 @@ pub fn validate_request(
             if let Some(schema) = schemas.schemas.get(&rb.schema.id) {
                 validate_value_against_schema("body", body_value, schema, schemas, &mut violations);
             }
-            
+
             // Check required fields from example
             if rb.required
                 && let Some(Value::Object(example_obj)) = &rb.example
@@ -475,7 +478,13 @@ fn validate_value_against_schema(
         ApiSchema::AllOf(variants) => {
             for variant in variants {
                 if let Some(variant_schema) = registry.schemas.get(&variant.id) {
-                    validate_value_against_schema(location, value, variant_schema, registry, violations);
+                    validate_value_against_schema(
+                        location,
+                        value,
+                        variant_schema,
+                        registry,
+                        violations,
+                    );
                 }
             }
         }
@@ -535,12 +544,8 @@ fn validate_string(
 
 fn validate_format(value: &str, format: &str) -> bool {
     match format {
-        "email" => {
-            value.contains('@') && value.contains('.') && value.len() >= 5
-        }
-        "uuid" => {
-            Uuid::parse_str(value).is_ok()
-        }
+        "email" => value.contains('@') && value.contains('.') && value.len() >= 5,
+        "uuid" => Uuid::parse_str(value).is_ok(),
         "date" => {
             // Simple YYYY-MM-DD check
             let re = Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap();
@@ -548,18 +553,15 @@ fn validate_format(value: &str, format: &str) -> bool {
         }
         "date-time" => {
             // ISO 8601 basic check
-            value.contains('T') && (value.ends_with('Z') || value.contains('+') || value.contains('-'))
+            value.contains('T')
+                && (value.ends_with('Z') || value.contains('+') || value.contains('-'))
         }
-        "uri" | "url" => {
-            value.starts_with("http://") || value.starts_with("https://")
-        }
+        "uri" | "url" => value.starts_with("http://") || value.starts_with("https://"),
         "ipv4" => {
             let re = Regex::new(r"^(\d{1,3}\.){3}\d{1,3}$").unwrap();
             re.is_match(value)
         }
-        "ipv6" => {
-            value.contains(':') && !value.contains('.')
-        }
+        "ipv6" => value.contains(':') && !value.contains('.'),
         _ => true, // Unknown formats pass
     }
 }
@@ -575,7 +577,11 @@ fn json_type_name(value: &Value) -> String {
     }
 }
 
-fn generated_value(schema: Option<&ApiSchema>, rng: &mut StdRng, registry: &api_core::SchemaRegistry) -> Value {
+fn generated_value(
+    schema: Option<&ApiSchema>,
+    rng: &mut StdRng,
+    registry: &api_core::SchemaRegistry,
+) -> Value {
     match schema {
         Some(ApiSchema::Boolean) => json!(rng.random::<bool>()),
         Some(ApiSchema::Integer(int_schema)) => {
@@ -629,7 +635,10 @@ fn generated_value(schema: Option<&ApiSchema>, rng: &mut StdRng, registry: &api_
             let mut result = serde_json::Map::new();
             for (prop_name, prop_ref) in &obj.properties {
                 let prop_schema = registry.schemas.get(&prop_ref.id);
-                result.insert(prop_name.clone(), generated_value(prop_schema, rng, registry));
+                result.insert(
+                    prop_name.clone(),
+                    generated_value(prop_schema, rng, registry),
+                );
             }
             Value::Object(result)
         }
@@ -652,7 +661,8 @@ fn generated_value(schema: Option<&ApiSchema>, rng: &mut StdRng, registry: &api_
             let mut result = serde_json::Map::new();
             for variant in variants {
                 if let Some(variant_schema) = registry.schemas.get(&variant.id) {
-                    if let Value::Object(obj) = generated_value(Some(variant_schema), rng, registry) {
+                    if let Value::Object(obj) = generated_value(Some(variant_schema), rng, registry)
+                    {
                         for (k, v) in obj {
                             result.insert(k, v);
                         }
@@ -698,62 +708,65 @@ impl TemplateEngine {
 
         // Replace template expressions
         let re = Regex::new(r"\{\{([^}]+)\}\}").unwrap();
-        
-        result = re.replace_all(&result, |caps: &regex::Captures| {
-            let expr = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
-            self.evaluate_expression(expr, request, &mut rng)
-        }).to_string();
+
+        result = re
+            .replace_all(&result, |caps: &regex::Captures| {
+                let expr = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("");
+                self.evaluate_expression(expr, request, &mut rng)
+            })
+            .to_string();
 
         result
     }
 
-    fn evaluate_expression(&self, expr: &str, request: &RequestContext, rng: &mut StdRng) -> String {
+    fn evaluate_expression(
+        &self,
+        expr: &str,
+        request: &RequestContext,
+        rng: &mut StdRng,
+    ) -> String {
         let parts: Vec<&str> = expr.split('.').collect();
         if parts.is_empty() {
             return expr.into();
         }
 
         match parts[0] {
-            "request" if parts.len() >= 2 => {
-                match parts[1] {
-                    "path" if parts.len() >= 3 => {
-                        request.path_params.get(parts[2]).cloned().unwrap_or_default()
-                    }
-                    "query" if parts.len() >= 3 => {
-                        request.query_params.get(parts[2]).cloned().unwrap_or_default()
-                    }
-                    "header" if parts.len() >= 3 => {
-                        request.headers.get(parts[2]).cloned().unwrap_or_default()
-                    }
-                    "body" if parts.len() >= 3 => {
-                        if let Some(body) = &request.body {
-                            get_json_path(body, &parts[2..]).unwrap_or_default()
-                        } else {
-                            String::new()
-                        }
-                    }
-                    _ => String::new(),
+            "request" if parts.len() >= 2 => match parts[1] {
+                "path" if parts.len() >= 3 => request
+                    .path_params
+                    .get(parts[2])
+                    .cloned()
+                    .unwrap_or_default(),
+                "query" if parts.len() >= 3 => request
+                    .query_params
+                    .get(parts[2])
+                    .cloned()
+                    .unwrap_or_default(),
+                "header" if parts.len() >= 3 => {
+                    request.headers.get(parts[2]).cloned().unwrap_or_default()
                 }
-            }
-            "random" if parts.len() >= 2 => {
-                match parts[1] {
-                    "uuid" => Uuid::new_v4().to_string(),
-                    "integer" => rng.random_range(0..=1000).to_string(),
-                    _ => String::new(),
+                "body" if parts.len() >= 3 => {
+                    if let Some(body) = &request.body {
+                        get_json_path(body, &parts[2..]).unwrap_or_default()
+                    } else {
+                        String::new()
+                    }
                 }
-            }
-            "now" if parts.len() >= 2 => {
-                match parts[1] {
-                    "iso8601" => Utc::now().to_rfc3339(),
-                    _ => Utc::now().to_string(),
-                }
-            }
-            "runtime" if parts.len() >= 2 => {
-                match parts[1] {
-                    "seed" => self.seed.to_string(),
-                    _ => String::new(),
-                }
-            }
+                _ => String::new(),
+            },
+            "random" if parts.len() >= 2 => match parts[1] {
+                "uuid" => Uuid::new_v4().to_string(),
+                "integer" => rng.random_range(0..=1000).to_string(),
+                _ => String::new(),
+            },
+            "now" if parts.len() >= 2 => match parts[1] {
+                "iso8601" => Utc::now().to_rfc3339(),
+                _ => Utc::now().to_string(),
+            },
+            "runtime" if parts.len() >= 2 => match parts[1] {
+                "seed" => self.seed.to_string(),
+                _ => String::new(),
+            },
             _ => expr.into(),
         }
     }
@@ -789,7 +802,11 @@ fn match_scenario(scenario: &MockScenario, request: &RequestContext) -> bool {
     }
 
     // Match method
-    if !scenario.r#match.method.eq_ignore_ascii_case(request.method.as_str()) {
+    if !scenario
+        .r#match
+        .method
+        .eq_ignore_ascii_case(request.method.as_str())
+    {
         return false;
     }
 
@@ -847,16 +864,14 @@ fn match_path(pattern: &str, actual: &str) -> bool {
 
 fn match_condition(condition: &MatchCondition, value: Option<&str>) -> bool {
     match condition {
-        MatchCondition::Equals { equals } => {
-            value.map(|v| {
-                match equals {
-                    Value::String(s) => v == s,
-                    Value::Number(n) => v == &n.to_string(),
-                    Value::Bool(b) => v == &b.to_string(),
-                    _ => false,
-                }
-            }).unwrap_or(false)
-        }
+        MatchCondition::Equals { equals } => value
+            .map(|v| match equals {
+                Value::String(s) => v == s,
+                Value::Number(n) => v == &n.to_string(),
+                Value::Bool(b) => v == &b.to_string(),
+                _ => false,
+            })
+            .unwrap_or(false),
         MatchCondition::Contains { contains } => {
             value.map(|v| v.contains(contains)).unwrap_or(false)
         }
@@ -867,17 +882,13 @@ fn match_condition(condition: &MatchCondition, value: Option<&str>) -> bool {
                 false
             }
         }
-        MatchCondition::Exists { exists } => {
-            value.is_some() == *exists
-        }
-        MatchCondition::Value(v) => {
-            value.map(|val| {
-                match v {
-                    Value::String(s) => val == s,
-                    _ => false,
-                }
-            }).unwrap_or(false)
-        }
+        MatchCondition::Exists { exists } => value.is_some() == *exists,
+        MatchCondition::Value(v) => value
+            .map(|val| match v {
+                Value::String(s) => val == s,
+                _ => false,
+            })
+            .unwrap_or(false),
     }
 }
 
@@ -923,7 +934,12 @@ pub fn resolve_response(
         && let Some(r) = ep.responses.first()
         && let Some(example) = &r.example
     {
-        return (r.status, example.clone(), ResponseSource::ContractExample, None);
+        return (
+            r.status,
+            example.clone(),
+            ResponseSource::ContractExample,
+            None,
+        );
     }
 
     // Generate from schema
@@ -985,7 +1001,7 @@ fn infer_resource_type(path: &str) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
-    
+
     // Look for collection patterns like /users, /users/{id}
     let first = segments[0];
     if !first.starts_with('{') {
@@ -1030,11 +1046,11 @@ async fn handle_stateful_request(
                     obj.insert("id".into(), json!(id.clone()));
                 }
                 rs.create(&resource_type, &id, resource.clone());
-                
+
                 if let Some(events) = &state.events {
                     events.state_changed("req", &resource_type, &id, StateOperation::Created);
                 }
-                
+
                 return Some((201, resource));
             }
         }
@@ -1060,7 +1076,12 @@ async fn handle_stateful_request(
                 if let Some(body) = &request.body {
                     if rs.update(&resource_type, id, body.clone()) {
                         if let Some(events) = &state.events {
-                            events.state_changed("req", &resource_type, id, StateOperation::Replaced);
+                            events.state_changed(
+                                "req",
+                                &resource_type,
+                                id,
+                                StateOperation::Replaced,
+                            );
                         }
                         return Some((200, body.clone()));
                     }
@@ -1073,14 +1094,21 @@ async fn handle_stateful_request(
             let path_params = extract_path_params(&request.path, &request.path);
             if let Some(id) = path_params.values().next() {
                 if let Some(existing) = rs.get(&resource_type, id).cloned() {
-                    if let (Value::Object(mut existing_obj), Some(Value::Object(patch))) = (existing, &request.body) {
+                    if let (Value::Object(mut existing_obj), Some(Value::Object(patch))) =
+                        (existing, &request.body)
+                    {
                         for (k, v) in patch {
                             existing_obj.insert(k.clone(), v.clone());
                         }
                         let updated = Value::Object(existing_obj);
                         rs.update(&resource_type, id, updated.clone());
                         if let Some(events) = &state.events {
-                            events.state_changed("req", &resource_type, id, StateOperation::Updated);
+                            events.state_changed(
+                                "req",
+                                &resource_type,
+                                id,
+                                StateOperation::Updated,
+                            );
                         }
                         return Some((200, updated));
                     }
@@ -1147,7 +1175,11 @@ async fn catch_all(
             rs.import(&data);
             return Json(json!({"status": "imported"})).into_response();
         }
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": "body required"}))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "body required"})),
+        )
+            .into_response();
     }
 
     let Some(core_method) = method_to_core(&method) else {
@@ -1165,7 +1197,8 @@ async fn catch_all(
             core_method.clone(),
             path.clone(),
             vec![],
-            body.as_ref().map(|b| serde_json::to_string(&b.0).unwrap_or_default()),
+            body.as_ref()
+                .map(|b| serde_json::to_string(&b.0).unwrap_or_default()),
         );
     }
 
@@ -1197,15 +1230,17 @@ async fn catch_all(
             if let Some(events) = &state.events {
                 events.validation_failed(&request_id, Some(&ep.id), violations.clone());
             }
-            
+
             let violation_json: Vec<Value> = violations
                 .iter()
-                .map(|v| json!({
-                    "location": v.location,
-                    "rule": v.rule,
-                    "expected": v.expected,
-                    "actual": v.actual,
-                }))
+                .map(|v| {
+                    json!({
+                        "location": v.location,
+                        "rule": v.rule,
+                        "expected": v.expected,
+                        "actual": v.actual,
+                    })
+                })
                 .collect();
 
             return (
@@ -1228,11 +1263,18 @@ async fn catch_all(
 
     // Handle stateful mode
     if state.stateful {
-        if let Some((status, response)) = handle_stateful_request(&state, &request_context, &state.state).await {
+        if let Some((status, response)) =
+            handle_stateful_request(&state, &request_context, &state.state).await
+        {
             let duration = start.elapsed().as_millis() as u64;
             if let Some(events) = &state.events {
                 events.response_generated(&request_id, ResponseSource::StatefulResource, None);
-                events.response_sent(&request_id, status, duration, Some(response.to_string().len()));
+                events.response_sent(
+                    &request_id,
+                    status,
+                    duration,
+                    Some(response.to_string().len()),
+                );
             }
             return (
                 StatusCode::from_u16(status).unwrap_or(StatusCode::OK),
@@ -1252,7 +1294,12 @@ async fn catch_all(
         }
         events.response_generated(&request_id, source, None);
         let duration = start.elapsed().as_millis() as u64;
-        events.response_sent(&request_id, status, duration, Some(payload.to_string().len()));
+        events.response_sent(
+            &request_id,
+            status,
+            duration,
+            Some(payload.to_string().len()),
+        );
     }
 
     (
@@ -1262,16 +1309,17 @@ async fn catch_all(
         .into_response()
 }
 
-async fn handle_state_endpoint(
-    State(state): State<RuntimeState>,
-    method: Method,
-) -> Response {
+async fn handle_state_endpoint(State(state): State<RuntimeState>, method: Method) -> Response {
     match method {
         Method::GET => {
             let rs = state.state.read().await;
             Json(rs.export()).into_response()
         }
-        _ => (StatusCode::METHOD_NOT_ALLOWED, Json(json!({"error": "method not allowed"}))).into_response()
+        _ => (
+            StatusCode::METHOD_NOT_ALLOWED,
+            Json(json!({"error": "method not allowed"})),
+        )
+            .into_response(),
     }
 }
 
@@ -1301,8 +1349,7 @@ pub async fn start_mock_server_with_events(
     stateful: bool,
     events: EventEmitter,
 ) -> anyhow::Result<()> {
-    let state = RuntimeState::new(contract, seed, scenarios, stateful)
-        .with_events(events);
+    let state = RuntimeState::new(contract, seed, scenarios, stateful).with_events(events);
 
     let app = Router::new()
         .route("/{*path}", any(catch_all))
@@ -1454,19 +1501,22 @@ mod tests {
     #[test]
     fn resource_state_crud() {
         let mut state = ResourceState::default();
-        
+
         // Create
         state.create("users", "u1", json!({"name": "Alice"}));
         assert!(state.get("users", "u1").is_some());
-        
+
         // List
         let list = state.list("users");
         assert_eq!(list.len(), 1);
-        
+
         // Update
         state.update("users", "u1", json!({"name": "Bob"}));
-        assert_eq!(state.get("users", "u1").unwrap().get("name"), Some(&json!("Bob")));
-        
+        assert_eq!(
+            state.get("users", "u1").unwrap().get("name"),
+            Some(&json!("Bob"))
+        );
+
         // Delete
         state.delete("users", "u1");
         assert!(state.get("users", "u1").is_none());
@@ -1476,10 +1526,13 @@ mod tests {
     fn format_validation() {
         assert!(validate_format("test@example.com", "email"));
         assert!(!validate_format("invalid", "email"));
-        
-        assert!(validate_format("550e8400-e29b-41d4-a716-446655440000", "uuid"));
+
+        assert!(validate_format(
+            "550e8400-e29b-41d4-a716-446655440000",
+            "uuid"
+        ));
         assert!(!validate_format("not-a-uuid", "uuid"));
-        
+
         assert!(validate_format("2026-01-01", "date"));
         assert!(!validate_format("01-01-2026", "date"));
     }
@@ -1487,7 +1540,10 @@ mod tests {
     #[test]
     fn match_path_with_params() {
         assert!(match_path("/users/{id}", "/users/123"));
-        assert!(match_path("/users/{id}/posts/{postId}", "/users/123/posts/456"));
+        assert!(match_path(
+            "/users/{id}/posts/{postId}",
+            "/users/123/posts/456"
+        ));
         assert!(!match_path("/users/{id}", "/users/123/extra"));
         assert!(!match_path("/users", "/posts"));
     }

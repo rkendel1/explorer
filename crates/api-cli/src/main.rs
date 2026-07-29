@@ -874,15 +874,17 @@ variables:
                         println!("Repository:\n  {}", project.repository.root);
                         println!("Runtime profiles:");
                         for profile in project.runtime_profiles {
-                            let safety = if profile.requires_confirmation {
-                                "requires confirmation"
-                            } else {
-                                "safe"
+                            let target_str = match &profile.target {
+                                api_projects::RuntimeTarget::MockRuntime => "mock".to_string(),
+                                api_projects::RuntimeTarget::LocalServer => "local".to_string(),
+                                api_projects::RuntimeTarget::RemoteHttp { url } => url.clone(),
                             };
-                            println!(
-                                "  {} -> {} ({})",
-                                profile.name, profile.runtime_target, safety
-                            );
+                            let safety = match profile.safety {
+                                api_projects::EnvironmentSafety::Safe => "safe",
+                                api_projects::EnvironmentSafety::Caution => "caution",
+                                api_projects::EnvironmentSafety::Production => "production",
+                            };
+                            println!("  {} -> {} ({})", profile.name, target_str, safety);
                         }
                     }
                     None => anyhow::bail!(

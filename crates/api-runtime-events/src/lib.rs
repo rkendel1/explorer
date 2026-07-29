@@ -278,12 +278,7 @@ impl EventEmitter {
         }));
     }
 
-    pub fn request_validated(
-        &self,
-        request_id: &str,
-        endpoint_id: &str,
-        valid: bool,
-    ) {
+    pub fn request_validated(&self, request_id: &str, endpoint_id: &str, valid: bool) {
         self.emit(RuntimeEvent::RequestValidated(RequestValidatedEvent {
             event_id: Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
@@ -310,12 +305,7 @@ impl EventEmitter {
         }));
     }
 
-    pub fn scenario_matched(
-        &self,
-        request_id: &str,
-        scenario_id: &str,
-        scenario_name: &str,
-    ) {
+    pub fn scenario_matched(&self, request_id: &str, scenario_id: &str, scenario_name: &str) {
         self.emit(RuntimeEvent::ScenarioMatched(ScenarioMatchedEvent {
             event_id: Uuid::new_v4().to_string(),
             timestamp: Utc::now(),
