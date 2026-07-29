@@ -10,17 +10,18 @@ use crate::redaction::RedactionService;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use zeroize::Zeroize;
 
 /// Default auto-lock timeout in minutes
 pub const DEFAULT_AUTO_LOCK_MINUTES: i64 = 15;
 
 /// Vault operational state
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum VaultState {
     /// Vault is locked, no secrets accessible
+    #[default]
     Locked,
     /// Vault is in the process of unlocking
     Unlocking,
@@ -28,12 +29,6 @@ pub enum VaultState {
     Unlocked,
     /// Vault encountered an error
     Error,
-}
-
-impl Default for VaultState {
-    fn default() -> Self {
-        Self::Locked
-    }
 }
 
 /// Error state details for vault operations
@@ -46,6 +41,7 @@ pub struct VaultErrorState {
 
 /// Vault session tracking
 #[derive(Debug)]
+#[allow(dead_code)]
 struct VaultSession {
     unlocked_at: DateTime<Utc>,
     last_activity: DateTime<Utc>,
@@ -146,14 +142,9 @@ impl VaultStateManager {
     /// Lock the vault, clearing all secret material from memory
     pub async fn lock(&self) {
         let mut state = self.state.write().await;
-        
-        // Clear session and key
-        if let Some(mut session) = self.session.write().await.take() {
-            if let Some(key) = session.key.take() {
-                // Key is dropped here, zeroizing memory
-                drop(key);
-            }
-        }
+
+        // Clear session and key - key's Drop implementation zeroizes memory
+        let _ = self.session.write().await.take();
 
         // Clear registered secrets from redaction service
         self.redaction.clear_secrets();
@@ -186,11 +177,15 @@ impl VaultStateManager {
         if state != VaultState::Unlocked {
             return None;
         }
-        
+
         // Record activity
         self.record_activity().await;
-        
-        self.session.read().await.as_ref().and_then(|s| s.key.clone())
+
+        self.session
+            .read()
+            .await
+            .as_ref()
+            .and_then(|s| s.key.clone())
     }
 
     /// Set auto-lock timeout in minutes
@@ -238,11 +233,11 @@ mod tests {
     #[tokio::test]
     async fn vault_unlock_and_lock() {
         let manager = VaultStateManager::new(None);
-        
+
         let key = SecureKey::new([0u8; 32]);
         manager.unlock(key).await.unwrap();
         assert_eq!(manager.state().await, VaultState::Unlocked);
-        
+
         manager.lock().await;
         assert_eq!(manager.state().await, VaultState::Locked);
     }
@@ -250,12 +245,12 @@ mod tests {
     #[tokio::test]
     async fn key_accessible_when_unlocked() {
         let manager = VaultStateManager::new(None);
-        
+
         assert!(manager.get_key().await.is_none());
-        
+
         let key = SecureKey::new([42u8; 32]);
         manager.unlock(key).await.unwrap();
-        
+
         let retrieved = manager.get_key().await.unwrap();
         assert_eq!(retrieved.as_bytes()[0], 42);
     }
@@ -263,10 +258,10 @@ mod tests {
     #[tokio::test]
     async fn key_cleared_on_lock() {
         let manager = VaultStateManager::new(None);
-        
+
         let key = SecureKey::new([42u8; 32]);
         manager.unlock(key).await.unwrap();
-        
+
         manager.lock().await;
         assert!(manager.get_key().await.is_none());
     }

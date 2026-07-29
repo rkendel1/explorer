@@ -59,20 +59,15 @@ impl EnvironmentSafety {
 }
 
 /// Runtime target type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
 pub enum RuntimeTarget {
     /// Local mock runtime
+    #[default]
     MockRuntime,
     /// Local development server (process management deferred)
     LocalServer,
     /// Remote HTTP endpoint
     RemoteHttp { url: String },
-}
-
-impl Default for RuntimeTarget {
-    fn default() -> Self {
-        Self::MockRuntime
-    }
 }
 
 impl<'de> serde::Deserialize<'de> for RuntimeTarget {
@@ -98,14 +93,18 @@ impl<'de> serde::Deserialize<'de> for RuntimeTarget {
                 E: de::Error,
             {
                 if value.starts_with("http") {
-                    Ok(RuntimeTarget::RemoteHttp { url: value.to_string() })
+                    Ok(RuntimeTarget::RemoteHttp {
+                        url: value.to_string(),
+                    })
                 } else if value == "mock" || value == "mock_runtime" {
                     Ok(RuntimeTarget::MockRuntime)
                 } else if value == "local" || value == "local_server" {
                     Ok(RuntimeTarget::LocalServer)
                 } else {
                     // Default to remote HTTP
-                    Ok(RuntimeTarget::RemoteHttp { url: value.to_string() })
+                    Ok(RuntimeTarget::RemoteHttp {
+                        url: value.to_string(),
+                    })
                 }
             }
 
@@ -207,7 +206,7 @@ impl<'de> serde::Deserialize<'de> for RuntimeProfile {
         D: serde::Deserializer<'de>,
     {
         let raw = RuntimeProfileRaw::deserialize(deserializer)?;
-        
+
         // Determine target - prefer new format, fall back to legacy
         let target = if let Some(t) = raw.target {
             t
@@ -388,11 +387,11 @@ mod tests {
     fn environment_safety_requires_confirmation() {
         assert!(!EnvironmentSafety::Safe.requires_confirmation("GET"));
         assert!(!EnvironmentSafety::Safe.requires_confirmation("POST"));
-        
+
         assert!(!EnvironmentSafety::Caution.requires_confirmation("GET"));
         assert!(EnvironmentSafety::Caution.requires_confirmation("POST"));
         assert!(EnvironmentSafety::Caution.requires_confirmation("DELETE"));
-        
+
         assert!(!EnvironmentSafety::Production.requires_confirmation("GET"));
         assert!(EnvironmentSafety::Production.requires_confirmation("POST"));
         assert!(EnvironmentSafety::Production.requires_confirmation("PUT"));
@@ -403,10 +402,10 @@ mod tests {
     #[test]
     fn runtime_profiles_have_correct_safety() {
         let profiles = default_runtime_profiles();
-        
+
         let mock = profiles.iter().find(|p| p.name == "Mock").unwrap();
         assert_eq!(mock.safety, EnvironmentSafety::Safe);
-        
+
         let prod = profiles.iter().find(|p| p.name == "Production").unwrap();
         assert_eq!(prod.safety, EnvironmentSafety::Production);
     }

@@ -114,17 +114,16 @@ impl RedactionService {
                     Value::String(self.redact_string(s))
                 }
             }
-            Value::Array(arr) => {
-                Value::Array(arr.iter().map(|v| self.redact_json_internal(v, in_secret_context)).collect())
-            }
+            Value::Array(arr) => Value::Array(
+                arr.iter()
+                    .map(|v| self.redact_json_internal(v, in_secret_context))
+                    .collect(),
+            ),
             Value::Object(map) => {
                 let mut new_map = serde_json::Map::new();
                 for (key, val) in map {
                     let is_secret_field = is_secret_field_name(key);
-                    new_map.insert(
-                        key.clone(),
-                        self.redact_json_internal(val, is_secret_field),
-                    );
+                    new_map.insert(key.clone(), self.redact_json_internal(val, is_secret_field));
                 }
                 Value::Object(new_map)
             }
@@ -191,10 +190,10 @@ mod tests {
     fn redact_known_secret_from_string() {
         let service = RedactionService::new();
         service.register_secret("my-secret-token");
-        
+
         let input = "Authorization: my-secret-token";
         let output = service.redact_string(input);
-        
+
         assert!(!output.contains("my-secret-token"));
         assert!(output.contains(REDACTED));
     }
@@ -202,15 +201,15 @@ mod tests {
     #[test]
     fn redact_secret_fields_in_json() {
         let service = RedactionService::new();
-        
+
         let input = json!({
             "username": "testuser",
             "password": "super-secret",
             "api_key": "key-12345"
         });
-        
+
         let output = service.redact_json(&input);
-        
+
         assert_eq!(output["username"], "testuser");
         assert_eq!(output["password"], REDACTED);
         assert_eq!(output["api_key"], REDACTED);
@@ -220,16 +219,19 @@ mod tests {
     fn redact_headers() {
         let service = RedactionService::new();
         service.register_secret("secret-value");
-        
+
         let headers = vec![
             ("Content-Type".to_string(), "application/json".to_string()),
             ("Authorization".to_string(), "******".to_string()),
             ("X-API-Key".to_string(), "another-secret".to_string()),
-            ("X-Custom".to_string(), "contains secret-value here".to_string()),
+            (
+                "X-Custom".to_string(),
+                "contains secret-value here".to_string(),
+            ),
         ];
-        
+
         let redacted = service.redact_headers(&headers);
-        
+
         assert_eq!(redacted[0].1, "application/json");
         assert_eq!(redacted[1].1, REDACTED);
         assert_eq!(redacted[2].1, REDACTED);
@@ -242,7 +244,6 @@ mod tests {
         assert_eq!(redact_preview("ab"), "••••ab");
         assert_eq!(redact_preview(""), "");
     }
-
 
     #[test]
     fn redact_auth_header_formats() {

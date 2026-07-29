@@ -22,19 +22,16 @@ use axum::{
     Json, Router,
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Response, sse::{Event, KeepAlive, Sse}},
+    response::{
+        IntoResponse, Response,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::{
-    collections::BTreeMap,
-    convert::Infallible,
-    net::SocketAddr,
-    path::PathBuf,
-    sync::Arc,
-};
-use tokio::sync::{broadcast, RwLock};
+use serde_json::{Value, json};
+use std::{collections::BTreeMap, convert::Infallible, net::SocketAddr, path::PathBuf, sync::Arc};
+use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
 /// Workbench configuration
@@ -216,15 +213,33 @@ async fn get_status(State(state): State<WorkbenchState>) -> Json<WorkbenchStatus
     let mock_running = *state.mock_running.read().await;
 
     let pending_summary = pending.as_ref().map(|cs| {
-        let added = cs.changes.iter().filter(|c| {
-            c.categories.iter().any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointAdded))
-        }).count();
-        let modified = cs.changes.iter().filter(|c| {
-            c.categories.iter().any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointModified))
-        }).count();
-        let removed = cs.changes.iter().filter(|c| {
-            c.categories.iter().any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointRemoved))
-        }).count();
+        let added = cs
+            .changes
+            .iter()
+            .filter(|c| {
+                c.categories
+                    .iter()
+                    .any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointAdded))
+            })
+            .count();
+        let modified = cs
+            .changes
+            .iter()
+            .filter(|c| {
+                c.categories
+                    .iter()
+                    .any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointModified))
+            })
+            .count();
+        let removed = cs
+            .changes
+            .iter()
+            .filter(|c| {
+                c.categories
+                    .iter()
+                    .any(|cat| matches!(cat, api_watch::ChangeCategory::EndpointRemoved))
+            })
+            .count();
         let breaking = cs.has_breaking_changes();
 
         PendingChangeSummary {
@@ -242,7 +257,10 @@ async fn get_status(State(state): State<WorkbenchState>) -> Json<WorkbenchStatus
         mock_running,
         mock_url: format!("http://127.0.0.1:{}", state.mock_port),
         endpoint_count: contract.as_ref().map(|c| c.endpoints.len()).unwrap_or(0),
-        schema_count: contract.as_ref().map(|c| c.schemas.schemas.len()).unwrap_or(0),
+        schema_count: contract
+            .as_ref()
+            .map(|c| c.schemas.schemas.len())
+            .unwrap_or(0),
         current_revision: revision.as_ref().map(|r| r.id.clone()),
         pending_changes: pending_summary,
     })
@@ -507,7 +525,7 @@ async fn accept_changes(State(state): State<WorkbenchState>) -> Response {
 
     // Accept the changes
     let cs = pending.take().unwrap();
-    
+
     // Load and apply
     match api_storage::load_effective_contract(&state.root) {
         Ok(contract) => {
@@ -597,10 +615,7 @@ pub fn create_router(state: WorkbenchState) -> Router {
 }
 
 /// Start the workbench server
-pub async fn start_workbench(
-    root: PathBuf,
-    config: WorkbenchConfig,
-) -> anyhow::Result<()> {
+pub async fn start_workbench(root: PathBuf, config: WorkbenchConfig) -> anyhow::Result<()> {
     let state = WorkbenchState::new(root.clone(), config.mock_port);
     state.load_initial().await?;
 

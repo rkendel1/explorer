@@ -1,0 +1,35 @@
+[package]
+name = "api-desktop-app"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+default = []
+tauri = ["dep:tauri"]
+
+[dependencies]
+anyhow.workspace = true
+api-client = { path = "../api-client" }
+api-core = { path = "../api-core" }
+api-desktop = { path = "../api-desktop" }
+api-mock-runtime = { path = "../api-mock-runtime" }
+api-projects = { path = "../api-projects" }
+api-runtime-events = { path = "../api-runtime-events" }
+api-storage = { path = "../api-storage" }
+api-testing = { path = "../api-testing" }
+api-vault = { path = "../api-vault" }
+api-watch = { path = "../api-watch" }
+api-workflows = { path = "../api-workflows" }
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["devtools"], optional = true }
+tokio.workspace = true
+uuid.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [], optional = true }
+
+[dev-dependencies]
+tempfile = "3"

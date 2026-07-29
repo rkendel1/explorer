@@ -1,6 +1,6 @@
 use api_core::{
-    ApiCollection, ApiContract, ApiEndpoint, ApiEnvironment, ApiMetadata, ApiSchema,
-    Diagnostic, DiagnosticSeverity, EndpointEvidence, EvidenceIndex, HeaderDefinition, HttpMethod,
+    ApiCollection, ApiContract, ApiEndpoint, ApiEnvironment, ApiMetadata, ApiSchema, Diagnostic,
+    DiagnosticSeverity, EndpointEvidence, EvidenceIndex, HeaderDefinition, HttpMethod,
     QueryParameter, RequestBody, SavedRequest, SchemaRegistry, SecurityScheme, ServerDefinition,
 };
 use serde_json::{Map, Value, json};

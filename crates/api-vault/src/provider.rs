@@ -6,7 +6,7 @@
 //! - Key provider abstraction
 
 use argon2::{Argon2, Params};
-use base64::{engine::general_purpose::STANDARD, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -83,13 +83,13 @@ impl Default for VaultMetadata {
 pub trait KeyProvider: Send + Sync {
     /// Get the encryption key
     fn get_key(&self) -> Result<[u8; 32], KeyProviderError>;
-    
+
     /// Store a new encryption key
     fn store_key(&self, key: &[u8; 32]) -> Result<(), KeyProviderError>;
-    
+
     /// Check if provider is available
     fn is_available(&self) -> bool;
-    
+
     /// Get provider type
     fn provider_type(&self) -> KeyProviderType;
 }
@@ -114,23 +114,23 @@ impl KeyProvider for KeychainProvider {
     fn get_key(&self) -> Result<[u8; 32], KeyProviderError> {
         let entry = keyring::Entry::new(&self.service_name, &self.account_name)
             .map_err(|_| KeyProviderError::KeychainUnavailable)?;
-        
+
         let encoded = entry
             .get_password()
             .map_err(|_| KeyProviderError::KeychainUnavailable)?;
-        
+
         decode_key(&encoded)
     }
 
     fn store_key(&self, key: &[u8; 32]) -> Result<(), KeyProviderError> {
         let entry = keyring::Entry::new(&self.service_name, &self.account_name)
             .map_err(|_| KeyProviderError::KeychainUnavailable)?;
-        
+
         let encoded = STANDARD.encode(key);
         entry
             .set_password(&encoded)
             .map_err(|_| KeyProviderError::KeychainUnavailable)?;
-        
+
         Ok(())
     }
 
@@ -166,7 +166,7 @@ impl Argon2Provider {
 
         // Derive key
         let key = derive_key_argon2(passphrase, &salt)?;
-        
+
         // Create verification hash
         let verification = create_verification_hash(&key);
 
@@ -187,21 +187,21 @@ impl Argon2Provider {
             .salt
             .as_ref()
             .ok_or(KeyProviderError::MetadataCorrupted)?;
-        
+
         let salt_bytes = STANDARD
             .decode(salt_encoded)
             .map_err(|_| KeyProviderError::MetadataCorrupted)?;
-        
+
         if salt_bytes.len() != SALT_LENGTH {
             return Err(KeyProviderError::MetadataCorrupted);
         }
-        
+
         let mut salt = [0u8; SALT_LENGTH];
         salt.copy_from_slice(&salt_bytes);
 
         // Derive key
         let key = derive_key_argon2(passphrase, &salt)?;
-        
+
         // Verify passphrase
         let verification = create_verification_hash(&key);
         if metadata.verification_hash.as_ref() != Some(&verification) {
@@ -249,17 +249,20 @@ impl KeyProvider for Argon2Provider {
 }
 
 /// Derive a key using Argon2id
-pub fn derive_key_argon2(passphrase: &str, salt: &[u8; SALT_LENGTH]) -> Result<[u8; 32], KeyProviderError> {
+pub fn derive_key_argon2(
+    passphrase: &str,
+    salt: &[u8; SALT_LENGTH],
+) -> Result<[u8; 32], KeyProviderError> {
     let params = Params::new(ARGON2_M_COST, ARGON2_T_COST, ARGON2_P_COST, Some(32))
         .map_err(|e| KeyProviderError::DerivationFailed(e.to_string()))?;
-    
+
     let argon2 = Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    
+
     let mut output_key = [0u8; 32];
     argon2
         .hash_password_into(passphrase.as_bytes(), salt, &mut output_key)
         .map_err(|e| KeyProviderError::DerivationFailed(e.to_string()))?;
-    
+
     Ok(output_key)
 }
 
@@ -325,24 +328,22 @@ pub fn migrate_legacy_key(root: &Path) -> Result<([u8; 32], KeyProviderType), Ke
     if !legacy_path.exists() {
         return Err(KeyProviderError::KeychainUnavailable);
     }
-    
+
     let encoded = fs::read_to_string(&legacy_path)?;
     let key = decode_key(encoded.trim())?;
-    
+
     // Try to migrate to keychain first
     let keychain = KeychainProvider::new(root);
-    if keychain.is_available() {
-        if keychain.store_key(&key).is_ok() {
-            // Remove legacy file securely
-            let mut zeros = vec![0u8; encoded.len()];
-            rand::rng().fill_bytes(&mut zeros);
-            let _ = fs::write(&legacy_path, &zeros);
-            let _ = fs::remove_file(&legacy_path);
-            
-            return Ok((key, KeyProviderType::SystemKeychain));
-        }
+    if keychain.is_available() && keychain.store_key(&key).is_ok() {
+        // Remove legacy file securely
+        let mut zeros = vec![0u8; encoded.len()];
+        rand::rng().fill_bytes(&mut zeros);
+        let _ = fs::write(&legacy_path, &zeros);
+        let _ = fs::remove_file(&legacy_path);
+
+        return Ok((key, KeyProviderType::SystemKeychain));
     }
-    
+
     // Cannot migrate automatically to Argon2id without user passphrase
     // Signal that migration is needed
     Err(KeyProviderError::MigrationRequired)
@@ -358,7 +359,7 @@ mod tests {
         let key1 = derive_key_argon2("test-passphrase", &salt).unwrap();
         let key2 = derive_key_argon2("test-passphrase", &salt).unwrap();
         let key3 = derive_key_argon2("different-passphrase", &salt).unwrap();
-        
+
         // Same passphrase + salt = same key
         assert_eq!(key1, key2);
         // Different passphrase = different key
@@ -368,7 +369,7 @@ mod tests {
     #[test]
     fn argon2_provider_init_and_verify() {
         let (provider, key) = Argon2Provider::init("my-secure-passphrase").unwrap();
-        
+
         // Create metadata
         let metadata = VaultMetadata {
             version: 2,
@@ -376,11 +377,13 @@ mod tests {
             salt: Some(provider.salt_base64()),
             verification_hash: Some(provider.verification_hash().to_string()),
         };
-        
+
         // Correct passphrase should work
-        let (_, key2) = Argon2Provider::from_metadata_and_passphrase(&metadata, "my-secure-passphrase").unwrap();
+        let (_, key2) =
+            Argon2Provider::from_metadata_and_passphrase(&metadata, "my-secure-passphrase")
+                .unwrap();
         assert_eq!(key, key2);
-        
+
         // Wrong passphrase should fail
         let result = Argon2Provider::from_metadata_and_passphrase(&metadata, "wrong-passphrase");
         assert!(matches!(result, Err(KeyProviderError::InvalidPassphrase)));
@@ -392,7 +395,7 @@ mod tests {
         let hash1 = create_verification_hash(&key);
         let hash2 = create_verification_hash(&key);
         assert_eq!(hash1, hash2);
-        
+
         let different_key = [43u8; 32];
         let hash3 = create_verification_hash(&different_key);
         assert_ne!(hash1, hash3);

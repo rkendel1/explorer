@@ -3,13 +3,13 @@
 //! This module provides automatic workflow step completion based on
 //! application events, eliminating the need for manual completion.
 
-use crate::{WorkflowStep, Workflow, save_workflow};
+use crate::{Workflow, WorkflowStep, save_workflow};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::{RwLock, broadcast};
 
 /// Workflow event kinds that can trigger step completion
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -85,14 +85,12 @@ impl CompletionPredicate {
                 event.context.get(key).map(|v| v == value).unwrap_or(false)
             }
             Self::ContextExists { key } => event.context.contains_key(key),
-            Self::CountAtLeast { key, min } => {
-                event
-                    .context
-                    .get(key)
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .map(|count| count >= *min)
-                    .unwrap_or(false)
-            }
+            Self::CountAtLeast { key, min } => event
+                .context
+                .get(key)
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|count| count >= *min)
+                .unwrap_or(false),
         }
     }
 }
@@ -217,7 +215,7 @@ impl WorkflowCompletionEngine {
                     .find(|s| s.id == rule.step_id && !s.completed)
                 {
                     step.completed = true;
-                    
+
                     // Persist the change
                     if let Err(e) = save_workflow(&self.root, workflow) {
                         results.push(CompletionResult {
@@ -244,13 +242,9 @@ impl WorkflowCompletionEngine {
     /// Get the current recommended step for a workflow
     pub async fn get_recommended_step(&self, workflow_id: &str) -> Option<WorkflowStep> {
         let workflows = self.workflows.read().await;
-        workflows.get(workflow_id).and_then(|workflow| {
-            workflow
-                .steps
-                .iter()
-                .find(|step| !step.completed)
-                .cloned()
-        })
+        workflows
+            .get(workflow_id)
+            .and_then(|workflow| workflow.steps.iter().find(|step| !step.completed).cloned())
     }
 
     /// Get workflow progress as (completed, total)
@@ -267,29 +261,42 @@ impl WorkflowCompletionEngine {
         // This would check application state to determine if steps
         // should be marked as completed based on existing evidence
         // For example, if a contract exists, the analyze-api step is complete
-        
+
         let mut workflows = self.workflows.write().await;
-        
+
         for workflow in workflows.values_mut() {
             // Check for connect-repository (always complete if we have a project)
-            if let Some(step) = workflow.steps.iter_mut().find(|s| s.id == "connect-repository") {
-                if !step.completed {
-                    // If we're running, the repository is connected
-                    step.completed = true;
-                }
+            if let Some(step) = workflow
+                .steps
+                .iter_mut()
+                .find(|s| s.id == "connect-repository" && !s.completed)
+            {
+                // If we're running, the repository is connected
+                step.completed = true;
             }
-            
+
             // Check for analyze-api (complete if contract exists)
             let contract_path = self.root.join(".repo-api/contract/effective.json");
-            if contract_path.exists() {
-                if let Some(step) = workflow.steps.iter_mut().find(|s| s.id == "analyze-api") {
-                    step.completed = true;
-                }
+            if contract_path.exists()
+                && let Some(step) = workflow
+                    .steps
+                    .iter_mut()
+                    .find(|s| s.id == "analyze-api" && !s.completed)
+            {
+                step.completed = true;
             }
-            
+
             // Save recovered state
             let _ = save_workflow(&self.root, workflow);
         }
+    }
+
+    /// Check if a step should be completed for a given event kind
+    /// This is a simple predicate check without actually completing the step
+    pub fn check_step(&self, step_id: &str, event_kind: &WorkflowEventKind) -> bool {
+        self.rules
+            .iter()
+            .any(|rule| rule.step_id == step_id && rule.event == *event_kind)
     }
 }
 
@@ -311,22 +318,22 @@ mod tests {
     async fn event_completes_matching_step() {
         let dir = tempfile::tempdir().unwrap();
         let workflow = create_workflow(dir.path(), "Test", starter_workflow_steps()).unwrap();
-        
+
         let engine = WorkflowCompletionEngine::with_defaults(dir.path());
         engine.register_workflow(workflow.clone()).await;
-        
+
         // Verify analyze-api starts incomplete
         let wf = engine.get_workflow(&workflow.id).await.unwrap();
         let step = wf.steps.iter().find(|s| s.id == "analyze-api").unwrap();
         assert!(!step.completed);
-        
+
         // Emit event
         let event = WorkflowEvent::new(WorkflowEventKind::RepositoryScanned);
         let results = engine.emit(event).await;
-        
+
         assert_eq!(results.len(), 1);
         assert!(results[0].success);
-        
+
         // Verify step is now complete
         let wf = engine.get_workflow(&workflow.id).await.unwrap();
         let step = wf.steps.iter().find(|s| s.id == "analyze-api").unwrap();
@@ -339,11 +346,11 @@ mod tests {
             key: "status".to_string(),
             value: "success".to_string(),
         };
-        
+
         let event_match = WorkflowEvent::new(WorkflowEventKind::RequestExecuted)
             .with_context("status", "success");
         assert!(predicate.evaluate(&event_match));
-        
+
         let event_no_match = WorkflowEvent::new(WorkflowEventKind::RequestExecuted)
             .with_context("status", "failure");
         assert!(!predicate.evaluate(&event_no_match));
@@ -353,10 +360,10 @@ mod tests {
     async fn get_recommended_step() {
         let dir = tempfile::tempdir().unwrap();
         let workflow = create_workflow(dir.path(), "Test", starter_workflow_steps()).unwrap();
-        
+
         let engine = WorkflowCompletionEngine::with_defaults(dir.path());
         engine.register_workflow(workflow.clone()).await;
-        
+
         // First incomplete step should be analyze-api (connect-repository is auto-completed)
         let recommended = engine.get_recommended_step(&workflow.id).await.unwrap();
         assert_eq!(recommended.id, "analyze-api");
@@ -366,10 +373,10 @@ mod tests {
     async fn get_progress() {
         let dir = tempfile::tempdir().unwrap();
         let workflow = create_workflow(dir.path(), "Test", starter_workflow_steps()).unwrap();
-        
+
         let engine = WorkflowCompletionEngine::with_defaults(dir.path());
         engine.register_workflow(workflow.clone()).await;
-        
+
         let (completed, total) = engine.get_progress(&workflow.id).await.unwrap();
         assert_eq!(completed, 1); // connect-repository is pre-completed
         assert_eq!(total, 6); // 6 steps total in starter workflow

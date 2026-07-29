@@ -884,10 +884,7 @@ variables:
                                 api_projects::EnvironmentSafety::Caution => "caution",
                                 api_projects::EnvironmentSafety::Production => "production",
                             };
-                            println!(
-                                "  {} -> {} ({})",
-                                profile.name, target_str, safety
-                            );
+                            println!("  {} -> {} ({})", profile.name, target_str, safety);
                         }
                     }
                     None => anyhow::bail!(

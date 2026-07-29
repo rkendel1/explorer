@@ -8,6 +8,9 @@
 //! - Result aggregation
 //! - Test reports
 
+#![allow(clippy::useless_format)]
+#![allow(clippy::map_clone)]
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -164,7 +167,10 @@ fn evaluate_status(assertion: Assertion, spec: &StatusAssertion, actual: u16) ->
         }
     } else if let Some((min, max)) = spec.range {
         if actual >= min && actual <= max {
-            AssertionResult::pass(assertion, format!("Status {} in range {}-{}", actual, min, max))
+            AssertionResult::pass(
+                assertion,
+                format!("Status {} in range {}-{}", actual, min, max),
+            )
         } else {
             AssertionResult::fail(
                 assertion,
@@ -184,7 +190,10 @@ fn evaluate_header(
     headers: &BTreeMap<String, String>,
 ) -> AssertionResult {
     let key = spec.name.to_lowercase();
-    let value = headers.iter().find(|(k, _)| k.to_lowercase() == key).map(|(_, v)| v);
+    let value = headers
+        .iter()
+        .find(|(k, _)| k.to_lowercase() == key)
+        .map(|(_, v)| v);
 
     if let Some(exists) = spec.exists {
         if value.is_some() == exists {
@@ -260,7 +269,11 @@ fn evaluate_body(assertion: Assertion, spec: &BodyAssertion, body: &Value) -> As
         }
     } else if let Some(substr) = &spec.contains {
         let str_val = value.and_then(|v| v.as_str().map(String::from));
-        if str_val.as_ref().map(|s| s.contains(substr)).unwrap_or(false) {
+        if str_val
+            .as_ref()
+            .map(|s| s.contains(substr))
+            .unwrap_or(false)
+        {
             AssertionResult::pass(
                 assertion,
                 format!("Path '{}' contains '{}'", spec.path, substr),
@@ -276,7 +289,10 @@ fn evaluate_body(assertion: Assertion, spec: &BodyAssertion, body: &Value) -> As
     } else if let Some(expected_type) = &spec.r#type {
         let actual_type = value.as_ref().map(json_type);
         if actual_type.as_ref() == Some(expected_type) {
-            AssertionResult::pass(assertion, format!("Path '{}' is type {}", spec.path, expected_type))
+            AssertionResult::pass(
+                assertion,
+                format!("Path '{}' is type {}", spec.path, expected_type),
+            )
         } else {
             AssertionResult::fail(
                 assertion,
@@ -326,22 +342,22 @@ fn json_path_query(path: &str, value: &Value) -> Option<Value> {
     // Simple JSONPath implementation for $.field.nested
     let path = path.trim_start_matches("$.");
     let mut current = value.clone();
-    
+
     for segment in path.split('.') {
         let segment = segment.trim();
         if segment.is_empty() {
             continue;
         }
-        
+
         // Handle array index: field[0]
         if let Some(idx_start) = segment.find('[') {
             let field = &segment[..idx_start];
             let idx_str = &segment[idx_start + 1..segment.len() - 1];
-            
+
             if !field.is_empty() {
                 current = current.get(field)?.clone();
             }
-            
+
             if let Ok(idx) = idx_str.parse::<usize>() {
                 current = current.get(idx)?.clone();
             }
@@ -349,7 +365,7 @@ fn json_path_query(path: &str, value: &Value) -> Option<Value> {
             current = current.get(segment)?.clone();
         }
     }
-    
+
     Some(current)
 }
 
@@ -545,7 +561,7 @@ pub struct TestCaseRef {
 pub fn load_test_suite(path: &Path) -> anyhow::Result<TestSuite> {
     let content = std::fs::read_to_string(path)?;
     let file: TestSuiteFile = serde_yaml::from_str(&content)?;
-    
+
     let tests = file
         .tests
         .into_iter()
@@ -578,11 +594,14 @@ pub fn load_test_suite(path: &Path) -> anyhow::Result<TestSuite> {
 pub fn generate_junit_report(results: &[SuiteResult]) -> String {
     let mut xml = String::from(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
     xml.push('\n');
-    
+
     let total_tests: usize = results.iter().map(|r| r.test_results.len()).sum();
     let total_failures: usize = results.iter().map(|r| r.failed).sum();
-    let total_time: f64 = results.iter().map(|r| r.total_duration_ms as f64 / 1000.0).sum();
-    
+    let total_time: f64 = results
+        .iter()
+        .map(|r| r.total_duration_ms as f64 / 1000.0)
+        .sum();
+
     xml.push_str(&format!(
         r#"<testsuites tests="{}" failures="{}" time="{:.3}">"#,
         total_tests, total_failures, total_time
@@ -605,13 +624,10 @@ pub fn generate_junit_report(results: &[SuiteResult]) -> String {
                 escape_xml(&test.test_name),
                 test.duration_ms as f64 / 1000.0
             ));
-            
+
             if !test.passed {
                 if let Some(err) = &test.error {
-                    xml.push_str(&format!(
-                        r#"<failure message="{}"/>"#,
-                        escape_xml(err)
-                    ));
+                    xml.push_str(&format!(r#"<failure message="{}"/>"#, escape_xml(err)));
                 } else {
                     let failed_assertions: Vec<_> = test
                         .assertion_results
@@ -626,7 +642,7 @@ pub fn generate_junit_report(results: &[SuiteResult]) -> String {
                     }
                 }
             }
-            
+
             xml.push_str("</testcase>\n");
         }
 
@@ -649,11 +665,11 @@ fn escape_xml(s: &str) -> String {
 pub fn format_test_results(results: &SuiteResult) -> String {
     let mut output = String::new();
     output.push_str(&format!("{}\n", results.suite_name));
-    
+
     for test in &results.test_results {
         let status = if test.passed { "PASS" } else { "FAIL" };
         output.push_str(&format!("{}  {}\n", status, test.test_name));
-        
+
         if !test.passed {
             for assertion in &test.assertion_results {
                 if !assertion.passed {
@@ -668,12 +684,12 @@ pub fn format_test_results(results: &SuiteResult) -> String {
             }
         }
     }
-    
+
     output.push_str(&format!(
         "{} passed\n{} failed\nDuration:\n  {} ms\n",
         results.passed, results.failed, results.total_duration_ms
     ));
-    
+
     output
 }
 

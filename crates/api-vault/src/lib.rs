@@ -24,7 +24,7 @@ pub use provider::{
     save_metadata,
 };
 use rand::RngCore;
-pub use redaction::{RedactionService, redact_preview, redact_auth_header, REDACTED};
+pub use redaction::{REDACTED, RedactionService, redact_auth_header, redact_preview};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 pub use state::{SecureKey, VaultErrorState, VaultState, VaultStateManager};
