@@ -71,7 +71,6 @@ fn action_to_string(action: &WorkflowAction) -> String {
 }
 
 /// List workflows
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_list(state: AppState<'_>) -> CommandResult<Vec<WorkflowSummary>> {
     let workflows = state.workflows.read().await;
 
@@ -99,7 +98,6 @@ pub async fn workflow_list(state: AppState<'_>) -> CommandResult<Vec<WorkflowSum
 }
 
 /// Get workflow details
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_get(
     state: AppState<'_>,
     request: GetWorkflowRequest,
@@ -129,7 +127,6 @@ pub async fn workflow_get(
 }
 
 /// Start a workflow
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_start(
     state: AppState<'_>,
     request: GetWorkflowRequest,
@@ -138,7 +135,6 @@ pub async fn workflow_start(
 }
 
 /// Resume a workflow from where it left off
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_resume(
     state: AppState<'_>,
     request: ResumeWorkflowRequest,
@@ -147,7 +143,6 @@ pub async fn workflow_resume(
 }
 
 /// Handle a workflow event (for automatic step completion)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn workflow_handle_event(
     state: AppState<'_>,
     request: WorkflowEventRequest,

@@ -41,7 +41,6 @@ pub struct DeleteEnvironmentRequest {
 }
 
 /// List all environments
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_list(
     state: AppState<'_>,
 ) -> CommandResult<Vec<EnvironmentSummary>> {
@@ -66,7 +65,6 @@ pub async fn environment_list(
 }
 
 /// Select an environment
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_select(
     state: AppState<'_>,
     request: SelectEnvironmentRequest,
@@ -91,7 +89,6 @@ pub async fn environment_select(
 }
 
 /// Update an environment
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_update(
     state: AppState<'_>,
     request: UpdateEnvironmentRequest,
@@ -123,7 +120,6 @@ pub async fn environment_update(
 }
 
 /// Create a new environment
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_create(
     state: AppState<'_>,
     request: CreateEnvironmentRequest,
@@ -151,7 +147,6 @@ pub async fn environment_create(
 }
 
 /// Delete an environment
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn environment_delete(
     state: AppState<'_>,
     request: DeleteEnvironmentRequest,

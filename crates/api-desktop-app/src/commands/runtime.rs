@@ -75,7 +75,6 @@ pub struct ImportRuntimeStateRequest {
 }
 
 /// Get runtime status
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_status(
     state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
@@ -84,7 +83,6 @@ pub async fn runtime_status(
 }
 
 /// Start the mock runtime
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_start(
     state: AppState<'_>,
     request: StartRuntimeRequest,
@@ -108,7 +106,6 @@ pub async fn runtime_start(
 }
 
 /// Stop the mock runtime
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_stop(state: AppState<'_>) -> CommandResult<RuntimeStatusResponse> {
     state.set_runtime_state(RuntimeStatus::Stopped, None).await;
 
@@ -117,7 +114,6 @@ pub async fn runtime_stop(state: AppState<'_>) -> CommandResult<RuntimeStatusRes
 }
 
 /// Restart the mock runtime
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_restart(
     state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
@@ -138,7 +134,6 @@ pub async fn runtime_restart(
 }
 
 /// Reset runtime state (clear all mock state)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_reset(
     state: AppState<'_>,
 ) -> CommandResult<RuntimeStatusResponse> {
@@ -149,7 +144,6 @@ pub async fn runtime_reset(
 }
 
 /// Get runtime events
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_events(
     state: AppState<'_>,
     _request: GetRuntimeEventsRequest,
@@ -164,7 +158,6 @@ pub async fn runtime_events(
 }
 
 /// Get runtime metrics
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_metrics(state: AppState<'_>) -> CommandResult<RuntimeMetrics> {
     let runtime = state.runtime.read().await;
 
@@ -177,7 +170,6 @@ pub async fn runtime_metrics(state: AppState<'_>) -> CommandResult<RuntimeMetric
 }
 
 /// Export runtime state
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_export_state(
     state: AppState<'_>,
 ) -> CommandResult<serde_json::Value> {
@@ -194,7 +186,6 @@ pub async fn runtime_export_state(
 }
 
 /// Import runtime state
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn runtime_import_state(
     state: AppState<'_>,
     _request: ImportRuntimeStateRequest,

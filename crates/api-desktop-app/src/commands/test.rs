@@ -39,7 +39,6 @@ pub struct ExportTestResultsRequest {
 }
 
 /// List test suites
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_list(state: AppState<'_>) -> CommandResult<Vec<TestSuiteSummary>> {
     let project = state.project.read().await;
 
@@ -51,7 +50,6 @@ pub async fn test_list(state: AppState<'_>) -> CommandResult<Vec<TestSuiteSummar
 }
 
 /// Run tests
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_run(
     state: AppState<'_>,
     request: RunTestsRequest,
@@ -74,7 +72,6 @@ pub async fn test_run(
 }
 
 /// Get test result details
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_result(
     state: AppState<'_>,
     _request: GetTestResultRequest,
@@ -89,7 +86,6 @@ pub async fn test_result(
 }
 
 /// Export test results
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn test_export(
     state: AppState<'_>,
     request: ExportTestResultsRequest,

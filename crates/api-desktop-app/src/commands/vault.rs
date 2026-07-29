@@ -62,7 +62,6 @@ pub struct RevealSecretResponse {
 }
 
 /// List vault entries
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_list(state: AppState<'_>) -> CommandResult<Vec<VaultEntryMetadata>> {
     let project = state.project.read().await;
 
@@ -74,7 +73,6 @@ pub async fn vault_list(state: AppState<'_>) -> CommandResult<Vec<VaultEntryMeta
 }
 
 /// Create a vault entry
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_create(
     state: AppState<'_>,
     request: CreateVaultEntryRequest,
@@ -103,7 +101,6 @@ pub async fn vault_create(
 }
 
 /// Update a vault entry
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_update(
     state: AppState<'_>,
     request: UpdateVaultEntryRequest,
@@ -132,7 +129,6 @@ pub async fn vault_update(
 }
 
 /// Delete a vault entry
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_delete(
     state: AppState<'_>,
     _request: DeleteVaultEntryRequest,
@@ -151,7 +147,6 @@ pub async fn vault_delete(
 }
 
 /// Unlock the vault
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_unlock(
     state: AppState<'_>,
     _request: UnlockVaultRequest,
@@ -166,7 +161,6 @@ pub async fn vault_unlock(
 }
 
 /// Lock the vault
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_lock(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
     state.set_vault_state(VaultState::Locked).await;
 
@@ -177,7 +171,6 @@ pub async fn vault_lock(state: AppState<'_>) -> CommandResult<VaultStateResponse
 }
 
 /// Get vault state
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_state(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
     let vault_state = state.get_vault_state().await;
 
@@ -197,7 +190,6 @@ pub async fn vault_state(state: AppState<'_>) -> CommandResult<VaultStateRespons
 }
 
 /// Reveal a secret value (requires unlocked vault)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_reveal(
     state: AppState<'_>,
     request: RevealSecretRequest,

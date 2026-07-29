@@ -48,7 +48,6 @@ pub struct DeleteRequestInput {
 }
 
 /// Execute a request
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_execute(
     state: AppState<'_>,
     request: ExecuteRequestInput,
@@ -102,7 +101,6 @@ pub async fn request_execute(
 }
 
 /// Save a request for later
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_save(
     state: AppState<'_>,
     request: SaveRequestInput,
@@ -124,7 +122,6 @@ pub async fn request_save(
 }
 
 /// Get request history
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_history(
     state: AppState<'_>,
 ) -> CommandResult<Vec<RequestHistoryEntry>> {
@@ -139,7 +136,6 @@ pub async fn request_history(
 }
 
 /// Delete a request from history
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_delete(
     state: AppState<'_>,
     request: DeleteRequestInput,
@@ -158,7 +154,6 @@ pub async fn request_delete(
 }
 
 /// Clear all request history for the current project
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_history_clear(state: AppState<'_>) -> CommandResult<()> {
     let project = state.project.read().await;
 

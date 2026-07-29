@@ -31,7 +31,6 @@ pub struct CreateProjectRequest {
 }
 
 /// List recent projects
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_list(state: AppState<'_>) -> CommandResult<Vec<RecentProject>> {
     match state.load_recent_projects().await {
         Ok(projects) => CommandResult::ok(projects),
@@ -40,7 +39,6 @@ pub async fn project_list(state: AppState<'_>) -> CommandResult<Vec<RecentProjec
 }
 
 /// Open a project at the given path
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_open(
     state: AppState<'_>,
     request: OpenProjectRequest,
@@ -61,7 +59,6 @@ pub async fn project_open(
 }
 
 /// Create a new project
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_create(
     state: AppState<'_>,
     request: CreateProjectRequest,
@@ -83,14 +80,12 @@ pub async fn project_create(
 }
 
 /// Close the current project
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_close(state: AppState<'_>) -> CommandResult<()> {
     state.close_project().await;
     CommandResult::ok(())
 }
 
 /// Remove a recent project from the list
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_remove_recent(
     state: AppState<'_>,
     path: String,

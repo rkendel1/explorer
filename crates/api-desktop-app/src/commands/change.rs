@@ -41,7 +41,6 @@ pub struct RejectChangeRequest {
 }
 
 /// List contract changes
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_list(state: AppState<'_>) -> CommandResult<ContractChangeSummary> {
     let project = state.project.read().await;
 
@@ -59,7 +58,6 @@ pub async fn change_list(state: AppState<'_>) -> CommandResult<ContractChangeSum
 }
 
 /// Review a specific change
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_review(
     state: AppState<'_>,
     _request: ReviewChangeRequest,
@@ -74,7 +72,6 @@ pub async fn change_review(
 }
 
 /// Accept a change (update effective contract)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_accept(
     state: AppState<'_>,
     _request: AcceptChangeRequest,
@@ -89,7 +86,6 @@ pub async fn change_accept(
 }
 
 /// Reject a change (keep current contract)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_reject(
     state: AppState<'_>,
     _request: RejectChangeRequest,
@@ -104,7 +100,6 @@ pub async fn change_reject(
 }
 
 /// Accept all changes
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_accept_all(state: AppState<'_>) -> CommandResult<usize> {
     let project = state.project.read().await;
 
@@ -116,7 +111,6 @@ pub async fn change_accept_all(state: AppState<'_>) -> CommandResult<usize> {
 }
 
 /// Keep current contract (reject all changes)
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn change_keep_current(state: AppState<'_>) -> CommandResult<usize> {
     let project = state.project.read().await;
 

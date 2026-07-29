@@ -37,7 +37,6 @@ pub struct ContractResponse {
 }
 
 /// List all endpoints
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn endpoint_list(state: AppState<'_>) -> CommandResult<Vec<EndpointSummary>> {
     let project = state.project.read().await;
 
@@ -69,7 +68,6 @@ pub async fn endpoint_list(state: AppState<'_>) -> CommandResult<Vec<EndpointSum
 }
 
 /// Get endpoint details
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn endpoint_get(
     state: AppState<'_>,
     request: GetEndpointRequest,
@@ -111,7 +109,6 @@ pub async fn endpoint_get(
 }
 
 /// List all schemas
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn schema_list(state: AppState<'_>) -> CommandResult<Vec<SchemaSummary>> {
     let project = state.project.read().await;
 
@@ -129,7 +126,6 @@ pub async fn schema_list(state: AppState<'_>) -> CommandResult<Vec<SchemaSummary
 }
 
 /// Get the current contract
-#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn contract_get(
     state: AppState<'_>,
     _request: GetContractRequest,
