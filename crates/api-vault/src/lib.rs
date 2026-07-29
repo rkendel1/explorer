@@ -1,12 +1,33 @@
+//! Secure vault for API credentials and secrets.
+//!
+//! This crate provides:
+//! - Encrypted secret storage
+//! - OS keychain integration
+//! - Argon2id passphrase-based fallback
+//! - Vault state management (lock/unlock)
+//! - Auto-lock functionality
+//! - Secret redaction service
+
+pub mod provider;
+pub mod redaction;
+pub mod state;
+
 use aes_gcm::{
     Aes256Gcm, Nonce,
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, Utc};
+pub use provider::{
+    Argon2Provider, KeyProvider, KeyProviderError, KeyProviderType, KeychainProvider,
+    VaultMetadata, derive_key_argon2, has_legacy_key_file, load_metadata, migrate_legacy_key,
+    save_metadata,
+};
 use rand::RngCore;
+pub use redaction::{RedactionService, redact_preview, redact_auth_header, REDACTED};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub use state::{SecureKey, VaultErrorState, VaultState, VaultStateManager};
 use std::{fs, path::Path};
 use uuid::Uuid;
 
@@ -223,19 +244,7 @@ fn decode_key(value: &str) -> anyhow::Result<[u8; 32]> {
 }
 
 pub fn redact(secret: &str) -> String {
-    if secret.is_empty() {
-        return "".into();
-    }
-    let visible = secret.chars().count().min(4);
-    let suffix: String = secret
-        .chars()
-        .rev()
-        .take(visible)
-        .collect::<Vec<char>>()
-        .into_iter()
-        .rev()
-        .collect();
-    format!("••••{}", suffix)
+    redaction::redact_preview(secret)
 }
 
 #[cfg(test)]
