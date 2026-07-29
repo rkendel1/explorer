@@ -13,7 +13,11 @@ api-discovery = { path = "../api-discovery" }
 api-mock-runtime = { path = "../api-mock-runtime" }
 api-repository = { path = "../api-repository" }
 api-storage = { path = "../api-storage" }
+api-testing = { path = "../api-testing" }
+api-watch = { path = "../api-watch" }
+api-workbench = { path = "../api-workbench" }
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

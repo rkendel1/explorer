@@ -1,0 +1,27 @@
+[package]
+name = "api-workbench"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+api-core = { path = "../api-core" }
+api-discovery = { path = "../api-discovery" }
+api-analyzers = { path = "../api-analyzers" }
+api-compiler = { path = "../api-compiler" }
+api-storage = { path = "../api-storage" }
+api-mock-runtime = { path = "../api-mock-runtime" }
+api-client = { path = "../api-client" }
+api-watch = { path = "../api-watch" }
+api-testing = { path = "../api-testing" }
+api-runtime-events = { path = "../api-runtime-events" }
+anyhow.workspace = true
+async-stream.workspace = true
+axum.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+tokio = { workspace = true, features = ["sync", "signal"] }
+tokio-stream.workspace = true
+uuid.workspace = true
