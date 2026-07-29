@@ -1,6 +1,5 @@
 //! Vault commands
 
-
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,7 +7,6 @@ use uuid::Uuid;
 use api_vault::VaultState;
 
 use crate::VaultEntryMetadata;
-use crate::state::DesktopStateManager;
 
 use super::{AppState, CommandResult};
 

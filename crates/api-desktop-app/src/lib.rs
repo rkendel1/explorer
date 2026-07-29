@@ -6,6 +6,7 @@
 //! - Application window state
 //! - Desktop notifications
 //! - Frontend asset integration
+//! - Service layer for platform integration
 //!
 //! This crate does NOT own:
 //! - Contract compilation
@@ -16,6 +17,7 @@
 //! - Workflow business logic
 
 pub mod commands;
+pub mod services;
 pub mod state;
 
 use api_projects::ApiProject;

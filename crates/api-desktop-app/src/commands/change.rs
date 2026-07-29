@@ -1,10 +1,8 @@
 //! Contract change commands
 
-
 use serde::{Deserialize, Serialize};
 
 use crate::ContractChangeSummary;
-use crate::state::DesktopStateManager;
 
 use super::{AppState, CommandResult};
 
