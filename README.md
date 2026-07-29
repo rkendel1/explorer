@@ -21,3 +21,8 @@ cargo run -p api-cli -- request --repository ./fixtures/express-api --environmen
 - `repo-api mock <repository> [--port 4010] [--seed 42] [--stateful]`
 - `repo-api request --repository <path> [--endpoint <id> | --method <m> --path <p>]`
 - `repo-api diff --before <contract> --after <contract>`
+- `repo-api desktop [--repository <path>]`
+- `repo-api open <repository>`
+- `repo-api project <create|show> ...`
+- `repo-api workflow <start|list|complete> ...`
+- `repo-api vault <set|list|reveal|delete> ...`

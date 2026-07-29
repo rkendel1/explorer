@@ -5,9 +5,14 @@ use api_compiler::{
 use api_core::{ApiMetadata, ApiToolError, HttpMethod, SchemaRegistry};
 use api_discovery::{DiscoveryEngine, build_context};
 use api_testing::{SuiteResult, generate_junit_report};
+use api_vault::{SecretType, VaultStore, redact};
 use api_watch::WatchConfig;
 use clap::{Parser, Subcommand};
-use std::{fs, net::SocketAddr, path::{Path, PathBuf}};
+use std::{
+    fs,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+};
 
 #[derive(Parser)]
 #[command(name = "repo-api")]
@@ -121,6 +126,34 @@ enum Commands {
         #[command(subcommand)]
         command: EnvironmentCommands,
     },
+    /// Start desktop runtime for a repository workspace
+    Desktop {
+        #[arg(long)]
+        repository: Option<PathBuf>,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Open a repository directly in desktop runtime
+    Open {
+        repository: PathBuf,
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Manage repository API project metadata
+    Project {
+        #[command(subcommand)]
+        command: ProjectCommands,
+    },
+    /// Manage guided workflows
+    Workflow {
+        #[command(subcommand)]
+        command: WorkflowCommands,
+    },
+    /// Manage secure vault entries
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -216,6 +249,64 @@ enum EnvironmentCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum ProjectCommands {
+    Create {
+        name: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Show {
+        #[arg(long)]
+        repository: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum WorkflowCommands {
+    List {
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Start {
+        name: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Complete {
+        workflow_id: String,
+        step_id: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum VaultCommands {
+    List {
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Set {
+        name: String,
+        secret: String,
+        #[arg(long, default_value = "custom")]
+        kind: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Reveal {
+        name: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+    Delete {
+        name: String,
+        #[arg(long)]
+        repository: PathBuf,
+    },
+}
+
 async fn scan_contract(repository: &Path) -> anyhow::Result<api_core::ApiContract> {
     api_storage::init_layout(repository)?;
     let context = build_context(repository.to_path_buf())?;
@@ -253,6 +344,21 @@ async fn scan_contract(repository: &Path) -> anyhow::Result<api_core::ApiContrac
     api_storage::save_collection(repository, &collection)?;
 
     Ok(contract)
+}
+
+fn parse_secret_type(kind: &str) -> anyhow::Result<SecretType> {
+    match kind.to_ascii_lowercase().as_str() {
+        "api-key" | "api_key" | "apikey" => Ok(SecretType::ApiKey),
+        "oauth-token" | "oauth_token" | "oauth" => Ok(SecretType::OAuthToken),
+        "bearer-token" | "bearer_token" | "bearer" => Ok(SecretType::BearerToken),
+        "basic-auth" | "basic_auth" | "basic" => Ok(SecretType::BasicAuth),
+        "database-credential" | "database_credential" | "database" => {
+            Ok(SecretType::DatabaseCredential)
+        }
+        "certificate" | "cert" => Ok(SecretType::Certificate),
+        "custom" => Ok(SecretType::Custom),
+        _ => anyhow::bail!("unsupported secret type '{kind}'"),
+    }
 }
 
 #[tokio::main]
@@ -371,14 +477,19 @@ async fn main() -> anyhow::Result<()> {
                             println!("No saved requests found.");
                         }
                     }
-                    RequestCommands::Run { name, repository, environment } => {
+                    RequestCommands::Run {
+                        name,
+                        repository,
+                        environment,
+                    } => {
                         let envs = api_storage::load_environments(&repository)?;
                         let env = envs
                             .into_iter()
                             .find(|e| e.name == environment)
                             .ok_or(api_core::ApiToolError::EnvironmentNotFound)?;
                         // Load and execute saved request
-                        let request_file = repository.join(format!(".repo-api/requests/saved/{}.json", name));
+                        let request_file =
+                            repository.join(format!(".repo-api/requests/saved/{}.json", name));
                         if !request_file.exists() {
                             anyhow::bail!("Request '{}' not found", name);
                         }
@@ -386,7 +497,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
             } else {
-                let repository = repository.ok_or_else(|| anyhow::anyhow!("--repository is required"))?;
+                let repository =
+                    repository.ok_or_else(|| anyhow::anyhow!("--repository is required"))?;
                 let envs = api_storage::load_environments(&repository)?;
                 let env = envs
                     .into_iter()
@@ -418,7 +530,8 @@ async fn main() -> anyhow::Result<()> {
                     };
                     let path = path.unwrap_or_else(|| "/".into());
                     let resp =
-                        api_client::execute_direct(&repository, method, &path, &env, body_json).await?;
+                        api_client::execute_direct(&repository, method, &path, &env, body_json)
+                            .await?;
                     println!("{}", serde_json::to_string_pretty(&resp)?);
                 }
             }
@@ -448,12 +561,14 @@ async fn main() -> anyhow::Result<()> {
                 strict_validation: strict,
                 incremental: !no_incremental,
             };
-            
+
             println!("Watching repository");
             println!("Repository:\n  {}", repository.display());
             println!("Current contract:\n  revision: ctr_{}", contract.version);
-            println!("Watching:\n  source files\n  OpenAPI files\n  route files\n  schema files\n  configuration files");
-            
+            println!(
+                "Watching:\n  source files\n  OpenAPI files\n  route files\n  schema files\n  configuration files"
+            );
+
             if mock {
                 println!("Mock runtime:\n  http://127.0.0.1:{}", port);
                 // Start mock server in background
@@ -466,12 +581,13 @@ async fn main() -> anyhow::Result<()> {
                         42,
                         vec![],
                         false,
-                    ).await;
+                    )
+                    .await;
                 });
             }
-            
+
             println!("Status:\n  synchronized");
-            
+
             // Create watcher and start watching
             let watcher = api_watch::RepositoryWatcher::new(repository.clone(), config);
             watcher.start().await?;
@@ -484,13 +600,13 @@ async fn main() -> anyhow::Result<()> {
             no_open,
         } => {
             let _contract = scan_contract(&repository).await?;
-            
+
             println!("API Workbench");
             println!("Repository:\n  {}", repository.display());
             println!("Open:\n  http://127.0.0.1:{}", port);
             println!("Mock:\n  http://127.0.0.1:{}", mock_port);
             println!("Status:\n  synchronized");
-            
+
             // Start workbench server
             let workbench_config = api_workbench::WorkbenchConfig {
                 workbench_port: port,
@@ -498,11 +614,8 @@ async fn main() -> anyhow::Result<()> {
                 watch_enabled: watch,
                 auto_open: !no_open,
             };
-            
-            api_workbench::start_workbench(
-                repository,
-                workbench_config,
-            ).await?;
+
+            api_workbench::start_workbench(repository, workbench_config).await?;
         }
         Commands::Scenario { command } => match command {
             ScenarioCommands::List { repository } => {
@@ -565,7 +678,10 @@ scenarios:
             }
         },
         Commands::State { command } => match command {
-            StateCommands::Export { output, repository: _ } => {
+            StateCommands::Export {
+                output,
+                repository: _,
+            } => {
                 // Export current mock state to file
                 let state_json = serde_json::json!({
                     "resources": {},
@@ -577,7 +693,10 @@ scenarios:
                 fs::write(&output, serde_json::to_string_pretty(&state_json)?)?;
                 println!("State exported to: {}", output.display());
             }
-            StateCommands::Import { input, repository: _ } => {
+            StateCommands::Import {
+                input,
+                repository: _,
+            } => {
                 if input.exists() {
                     println!("State imported from: {}", input.display());
                 } else {
@@ -595,16 +714,17 @@ scenarios:
             report,
             repository,
         } => {
-            let repository = repository.ok_or_else(|| anyhow::anyhow!("--repository is required"))?;
+            let repository =
+                repository.ok_or_else(|| anyhow::anyhow!("--repository is required"))?;
             let envs = api_storage::load_environments(&repository)?;
             let env = envs
                 .into_iter()
                 .find(|e| e.name == environment)
                 .ok_or(api_core::ApiToolError::EnvironmentNotFound)?;
-            
+
             let suites_path = repository.join(".repo-api/tests/suites");
             let mut results: Vec<SuiteResult> = Vec::new();
-            
+
             if all {
                 if suites_path.exists() {
                     for entry in fs::read_dir(&suites_path)? {
@@ -627,7 +747,10 @@ scenarios:
                     }
                 }
             } else if let Some(suite_name) = suite {
-                println!("Running suite: {} with environment: {}", suite_name, env.name);
+                println!(
+                    "Running suite: {} with environment: {}",
+                    suite_name, env.name
+                );
                 let result = SuiteResult {
                     suite_id: format!("suite_{}", suite_name),
                     suite_name,
@@ -640,16 +763,16 @@ scenarios:
                 };
                 results.push(result);
             }
-            
+
             // Print summary
             let total_passed: usize = results.iter().map(|r| r.passed).sum();
             let total_failed: usize = results.iter().map(|r| r.failed).sum();
             let total_duration: u64 = results.iter().map(|r| r.total_duration_ms).sum();
-            
+
             println!("{} passed", total_passed);
             println!("{} failed", total_failed);
             println!("Duration:\n  {} ms", total_duration);
-            
+
             // Generate report if requested
             if let Some(report_path) = report {
                 let junit = generate_junit_report(&results);
@@ -672,15 +795,24 @@ scenarios:
                 let envs_path = repository.join(".repo-api/environments");
                 fs::create_dir_all(&envs_path)?;
                 let env_file = envs_path.join(format!("{}.yaml", name));
-                let template = format!(r#"name: {}
+                let template = format!(
+                    r#"name: {}
 variables:
   baseUrl:
     value: http://127.0.0.1:4010
-"#, name);
+"#,
+                    name
+                );
                 fs::write(&env_file, template)?;
                 println!("Created environment: {}", name);
             }
-            EnvironmentCommands::Set { name, key, value, repository, secret } => {
+            EnvironmentCommands::Set {
+                name,
+                key,
+                value,
+                repository,
+                secret,
+            } => {
                 let env_file = repository.join(format!(".repo-api/environments/{}.yaml", name));
                 if env_file.exists() {
                     let content = fs::read_to_string(&env_file)?;
@@ -697,9 +829,147 @@ variables:
                         format!("{}{}", content, new_var)
                     };
                     fs::write(&env_file, updated)?;
-                    println!("Set {} = {} in environment: {}", key, if secret { "****" } else { &value }, name);
+                    println!(
+                        "Set {} = {} in environment: {}",
+                        key,
+                        if secret { "****" } else { &value },
+                        name
+                    );
                 } else {
                     anyhow::bail!("Environment '{}' not found", name);
+                }
+            }
+        },
+        Commands::Desktop { repository, name } => {
+            let repository = repository.unwrap_or_else(|| PathBuf::from("."));
+            let summary = api_desktop::launch_or_open(&repository, name.as_deref())?;
+            println!("Repo API Desktop");
+            println!("Repository:\n  {}", repository.display());
+            println!("Project:\n  {}", summary.project.name);
+            println!(
+                "Discovered:\n  {} endpoints\n  {} schemas",
+                summary.endpoint_count, summary.schema_count
+            );
+            println!("Workflows:\n  {}", summary.workflow_count);
+        }
+        Commands::Open { repository, name } => {
+            let summary = api_desktop::launch_or_open(&repository, name.as_deref())?;
+            println!("Opened project: {}", summary.project.name);
+            println!(
+                "Workspace ready with {} workflow(s)",
+                summary.workflow_count
+            );
+        }
+        Commands::Project { command } => match command {
+            ProjectCommands::Create { name, repository } => {
+                api_storage::init_layout(&repository)?;
+                let project = api_projects::create_project(&repository, name)?;
+                println!("Created project: {}", project.name);
+                println!("Project file:\n  .repo-api/project.json");
+            }
+            ProjectCommands::Show { repository } => {
+                match api_projects::load_project(&repository)? {
+                    Some(project) => {
+                        println!("Project: {}", project.name);
+                        println!("Repository:\n  {}", project.repository.root);
+                        println!("Runtime profiles:");
+                        for profile in project.runtime_profiles {
+                            let safety = if profile.requires_confirmation {
+                                "requires confirmation"
+                            } else {
+                                "safe"
+                            };
+                            println!(
+                                "  {} -> {} ({})",
+                                profile.name, profile.runtime_target, safety
+                            );
+                        }
+                    }
+                    None => anyhow::bail!(
+                        "project not found; create one with `repo-api project create <name> --repository <path>`"
+                    ),
+                }
+            }
+        },
+        Commands::Workflow { command } => match command {
+            WorkflowCommands::List { repository } => {
+                let workflows = api_workflows::list_workflows(&repository)?;
+                if workflows.is_empty() {
+                    println!("No workflows found.");
+                } else {
+                    println!("Workflows:");
+                    for workflow in workflows {
+                        let completed = workflow.steps.iter().filter(|step| step.completed).count();
+                        println!(
+                            "  {} ({}/{})",
+                            workflow.name,
+                            completed,
+                            workflow.steps.len()
+                        );
+                    }
+                }
+            }
+            WorkflowCommands::Start { name, repository } => {
+                let workflow = api_workflows::create_workflow(
+                    &repository,
+                    name,
+                    api_workflows::starter_workflow_steps(),
+                )?;
+                println!("Started workflow: {}", workflow.name);
+                println!("Workflow id:\n  {}", workflow.id);
+            }
+            WorkflowCommands::Complete {
+                workflow_id,
+                step_id,
+                repository,
+            } => {
+                let workflow = api_workflows::complete_step(&repository, &workflow_id, &step_id)?;
+                let completed = workflow.steps.iter().filter(|step| step.completed).count();
+                println!("Updated workflow: {}", workflow.name);
+                println!(
+                    "Progress:\n  {}/{} complete",
+                    completed,
+                    workflow.steps.len()
+                );
+            }
+        },
+        Commands::Vault { command } => match command {
+            VaultCommands::List { repository } => {
+                let vault = VaultStore::open(&repository)?;
+                let entries = vault.list_entries()?;
+                if entries.is_empty() {
+                    println!("Vault is empty.");
+                } else {
+                    println!("Vault entries:");
+                    for entry in entries {
+                        println!("  {} ({:?})", entry.name, entry.secret_type);
+                    }
+                }
+            }
+            VaultCommands::Set {
+                name,
+                secret,
+                kind,
+                repository,
+            } => {
+                let vault = VaultStore::open(&repository)?;
+                let secret_type = parse_secret_type(&kind)?;
+                let entry = vault.upsert_secret(&name, secret_type, &secret)?;
+                println!("Saved vault entry: {}", entry.name);
+                println!("Secret preview:\n  {}", redact(&secret));
+            }
+            VaultCommands::Reveal { name, repository } => {
+                let vault = VaultStore::open(&repository)?;
+                let value = vault.resolve_secret(&name)?;
+                println!("Vault entry: {}", name);
+                println!("Value:\n  {}", redact(&value));
+            }
+            VaultCommands::Delete { name, repository } => {
+                let vault = VaultStore::open(&repository)?;
+                if vault.delete_secret(&name)? {
+                    println!("Deleted vault entry: {}", name);
+                } else {
+                    anyhow::bail!("vault entry '{}' not found", name);
                 }
             }
         },
