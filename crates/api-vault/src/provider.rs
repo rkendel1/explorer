@@ -160,9 +160,10 @@ impl Argon2Provider {
 
     /// Initialize a new Argon2 provider with a passphrase
     pub fn init(passphrase: &str) -> Result<(Self, [u8; 32]), KeyProviderError> {
-        // Generate random salt
+        // Generate cryptographically secure random salt
+        // Note: The initial zero-fill is immediately overwritten with secure random bytes
         let mut salt = [0u8; SALT_LENGTH];
-        rand::rng().fill_bytes(&mut salt);
+        rand::rng().fill_bytes(&mut salt); // Fill with secure random data
 
         // Derive key
         let key = derive_key_argon2(passphrase, &salt)?;
@@ -196,8 +197,9 @@ impl Argon2Provider {
             return Err(KeyProviderError::MetadataCorrupted);
         }
 
+        // Load the stored salt from metadata (not using the zero-fill)
         let mut salt = [0u8; SALT_LENGTH];
-        salt.copy_from_slice(&salt_bytes);
+        salt.copy_from_slice(&salt_bytes); // Overwrites with stored salt
 
         // Derive key
         let key = derive_key_argon2(passphrase, &salt)?;
@@ -355,6 +357,7 @@ mod tests {
 
     #[test]
     fn argon2_key_derivation() {
+        // Using fixed salt for deterministic testing - NOT for production use
         let salt = [1u8; SALT_LENGTH];
         let key1 = derive_key_argon2("test-passphrase", &salt).unwrap();
         let key2 = derive_key_argon2("test-passphrase", &salt).unwrap();
