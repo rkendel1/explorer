@@ -1,9 +1,7 @@
 //! Test execution commands
 
-
 use serde::{Deserialize, Serialize};
 
-use crate::state::DesktopStateManager;
 use crate::{TestResultDetail, TestSuiteSummary};
 
 use super::{AppState, CommandResult};

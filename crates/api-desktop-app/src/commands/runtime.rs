@@ -1,9 +1,7 @@
 //! Runtime commands for mock server control
 
-
 use serde::{Deserialize, Serialize};
 
-use crate::state::DesktopStateManager;
 use crate::{RuntimeState, RuntimeStatus};
 
 use super::{AppState, CommandResult};
@@ -75,9 +73,7 @@ pub struct ImportRuntimeStateRequest {
 }
 
 /// Get runtime status
-pub async fn runtime_status(
-    state: AppState<'_>,
-) -> CommandResult<RuntimeStatusResponse> {
+pub async fn runtime_status(state: AppState<'_>) -> CommandResult<RuntimeStatusResponse> {
     let runtime = state.runtime.read().await;
     CommandResult::ok(RuntimeStatusResponse::from(&*runtime))
 }
@@ -114,9 +110,7 @@ pub async fn runtime_stop(state: AppState<'_>) -> CommandResult<RuntimeStatusRes
 }
 
 /// Restart the mock runtime
-pub async fn runtime_restart(
-    state: AppState<'_>,
-) -> CommandResult<RuntimeStatusResponse> {
+pub async fn runtime_restart(state: AppState<'_>) -> CommandResult<RuntimeStatusResponse> {
     let runtime = state.runtime.read().await;
     let address = runtime.address.clone();
     drop(runtime);
@@ -134,9 +128,7 @@ pub async fn runtime_restart(
 }
 
 /// Reset runtime state (clear all mock state)
-pub async fn runtime_reset(
-    state: AppState<'_>,
-) -> CommandResult<RuntimeStatusResponse> {
+pub async fn runtime_reset(state: AppState<'_>) -> CommandResult<RuntimeStatusResponse> {
     state.update_runtime_metrics(0, 0).await;
 
     let runtime = state.runtime.read().await;
@@ -170,9 +162,7 @@ pub async fn runtime_metrics(state: AppState<'_>) -> CommandResult<RuntimeMetric
 }
 
 /// Export runtime state
-pub async fn runtime_export_state(
-    state: AppState<'_>,
-) -> CommandResult<serde_json::Value> {
+pub async fn runtime_export_state(state: AppState<'_>) -> CommandResult<serde_json::Value> {
     let project = state.project.read().await;
 
     if project.is_none() {

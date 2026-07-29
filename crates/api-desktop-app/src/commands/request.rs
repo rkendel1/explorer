@@ -7,7 +7,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::state::{DesktopStateManager, RequestHistoryEntry};
+use crate::state::RequestHistoryEntry;
 use crate::{RequestResult, ValidationResult};
 
 use super::{AppState, CommandResult};
@@ -122,9 +122,7 @@ pub async fn request_save(
 }
 
 /// Get request history
-pub async fn request_history(
-    state: AppState<'_>,
-) -> CommandResult<Vec<RequestHistoryEntry>> {
+pub async fn request_history(state: AppState<'_>) -> CommandResult<Vec<RequestHistoryEntry>> {
     let project = state.project.read().await;
 
     if let Some(project) = project.as_ref() {
@@ -136,10 +134,7 @@ pub async fn request_history(
 }
 
 /// Delete a request from history
-pub async fn request_delete(
-    state: AppState<'_>,
-    request: DeleteRequestInput,
-) -> CommandResult<()> {
+pub async fn request_delete(state: AppState<'_>, request: DeleteRequestInput) -> CommandResult<()> {
     let project = state.project.read().await;
 
     if let Some(project) = project.as_ref() {

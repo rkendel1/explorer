@@ -1,9 +1,7 @@
 //! Contract and endpoint commands
 
-
 use serde::{Deserialize, Serialize};
 
-use crate::state::DesktopStateManager;
 use crate::{EndpointDetail, EndpointSummary, EvidenceInfo, ParameterInfo, ResponseInfo};
 
 use super::{AppState, CommandResult};

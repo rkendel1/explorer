@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use crate::RecentProject;
-use crate::state::DesktopStateManager;
 
 use super::{AppState, CommandResult};
 
@@ -86,10 +85,7 @@ pub async fn project_close(state: AppState<'_>) -> CommandResult<()> {
 }
 
 /// Remove a recent project from the list
-pub async fn project_remove_recent(
-    state: AppState<'_>,
-    path: String,
-) -> CommandResult<()> {
+pub async fn project_remove_recent(state: AppState<'_>, path: String) -> CommandResult<()> {
     let path = PathBuf::from(&path);
     let mut projects = state.recent_projects.write().await;
     projects.retain(|p| p.path != path);

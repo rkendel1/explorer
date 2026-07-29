@@ -1,9 +1,6 @@
 //! Environment commands
 
-
 use serde::{Deserialize, Serialize};
-
-use crate::state::DesktopStateManager;
 
 use super::{AppState, CommandResult};
 
@@ -41,9 +38,7 @@ pub struct DeleteEnvironmentRequest {
 }
 
 /// List all environments
-pub async fn environment_list(
-    state: AppState<'_>,
-) -> CommandResult<Vec<EnvironmentSummary>> {
+pub async fn environment_list(state: AppState<'_>) -> CommandResult<Vec<EnvironmentSummary>> {
     let project = state.project.read().await;
     let active_env = state.active_environment.read().await;
 

@@ -1,13 +1,11 @@
 //! Workflow commands
 
-
 use serde::{Deserialize, Serialize};
 
 use api_workflows::WorkflowAction;
 use api_workflows::events::WorkflowEventKind;
 
 use crate::WorkflowStepSummary;
-use crate::state::DesktopStateManager;
 
 use super::{AppState, CommandResult};
 
