@@ -64,6 +64,7 @@ fn main() {
             schema_get,
             contract_get,
             contract_rescan,
+            contract_meaning_graph,
             environment_list,
             environment_select,
             environment_update,

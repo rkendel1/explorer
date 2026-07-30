@@ -119,6 +119,75 @@ pub struct EndpointDetail {
     pub security: Vec<String>,
     pub confidence: f32,
     pub evidence: Vec<EvidenceInfo>,
+    pub semantic_intent: Option<EndpointSemanticIntent>,
+}
+
+/// Semantic intent inferred for an endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EndpointSemanticIntent {
+    pub primary_intent: String,
+    pub rationale: String,
+    pub confidence: f32,
+    pub capabilities: Vec<String>,
+    pub domain_concepts: Vec<String>,
+    pub data_models: Vec<String>,
+    pub behavioral_fingerprint: BehavioralFingerprint,
+}
+
+/// Endpoint/API behavior classification scores.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehavioralFingerprint {
+    pub dominant: String,
+    pub scores: Vec<BehaviorScore>,
+}
+
+/// Weighted score for a behavior category.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BehaviorScore {
+    pub behavior: String,
+    pub score: f32,
+}
+
+/// Meaning graph node linking API behavior to domain language.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeaningGraphNode {
+    pub id: String,
+    pub label: String,
+    pub node_type: String,
+}
+
+/// Meaning graph edge between endpoint/capability/concept/model nodes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeaningGraphEdge {
+    pub source: String,
+    pub target: String,
+    pub relation: String,
+    pub weight: f32,
+}
+
+/// Per-endpoint semantic interpretation within the meaning graph.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeaningGraphEndpointIntent {
+    pub endpoint_id: String,
+    pub method: String,
+    pub path: String,
+    pub primary_intent: String,
+    pub confidence: f32,
+    pub capabilities: Vec<String>,
+    pub domain_concepts: Vec<String>,
+    pub data_models: Vec<String>,
+    pub behavioral_fingerprint: BehavioralFingerprint,
+}
+
+/// Graph view connecting endpoints with capabilities, concepts, and models.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiMeaningGraph {
+    pub cache_key: String,
+    pub generated_at: chrono::DateTime<chrono::Utc>,
+    pub nodes: Vec<MeaningGraphNode>,
+    pub edges: Vec<MeaningGraphEdge>,
+    pub endpoint_intents: Vec<MeaningGraphEndpointIntent>,
+    pub behavioral_fingerprint: BehavioralFingerprint,
 }
 
 /// Parameter information

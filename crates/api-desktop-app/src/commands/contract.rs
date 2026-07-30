@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::services::ExplorerService;
 use crate::services::explorer_service::{EndpointFilter, SchemaDetail, SchemaSummary};
-use crate::{EndpointDetail, EndpointSummary};
+use crate::{ApiMeaningGraph, EndpointDetail, EndpointSummary};
 
 use super::{AppState, CommandResult, from_service, state_handle};
 
@@ -95,4 +95,11 @@ pub async fn contract_get(state: AppState<'_>) -> CommandResult<ContractResponse
 pub async fn contract_rescan(state: AppState<'_>) -> CommandResult<usize> {
     let state = state_handle(&state);
     from_service(ExplorerService::refresh_contract(&state).await)
+}
+
+/// Build semantic meaning graph for the active API contract
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn contract_meaning_graph(state: AppState<'_>) -> CommandResult<ApiMeaningGraph> {
+    let state = state_handle(&state);
+    from_service(ExplorerService::meaning_graph(&state).await)
 }

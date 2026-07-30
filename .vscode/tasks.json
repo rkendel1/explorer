@@ -629,6 +629,66 @@
 			"problemMatcher": [
 				"$rustc"
 			]
+		},
+		{
+			"label": "validate-meaning-graph",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-semantic-suite",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-semantic-suite-2",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-semantic-suite-3",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo test -p api-desktop-app explorer_service::tests::test_infer_semantic_intent_with_behavioral_fingerprint && cargo test -p api-desktop-app explorer_service::tests::test_meaning_graph_cache_key_changes_with_endpoint_path && cd apps/desktop && npm run lint"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-semantic-suite-final",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
 		}
 	]
 }
