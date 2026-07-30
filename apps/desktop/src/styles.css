@@ -234,6 +234,23 @@ body {
   transition: border-color 0.15s;
 }
 
+.project-item-open {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  text-align: left;
+  gap: 0.15rem;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.project-item-open:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .project-item:hover {
   border-color: #4f46e5;
 }

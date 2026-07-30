@@ -518,6 +518,12 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-projects-dashboard-home",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
 		}
 	]
 }
