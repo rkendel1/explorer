@@ -39,7 +39,7 @@ pub async fn project_open(
     request: OpenProjectRequest,
 ) -> CommandResult<ProjectSummary> {
     let state = state_handle(&state);
-    from_service(ProjectService::open_project(&state, PathBuf::from(&request.path)).await)
+    from_service(ProjectService::open_project_input(&state, &request.path).await)
 }
 
 /// Create a new project (currently identical to opening one - project
@@ -50,7 +50,7 @@ pub async fn project_create(
     request: CreateProjectRequest,
 ) -> CommandResult<ProjectSummary> {
     let state = state_handle(&state);
-    from_service(ProjectService::open_project(&state, PathBuf::from(&request.path)).await)
+    from_service(ProjectService::open_project_input(&state, &request.path).await)
 }
 
 /// Close the current project

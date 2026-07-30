@@ -7,6 +7,7 @@
 //! - Project restoration on restart
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 
 use api_workflows::events::WorkflowCompletionEngine;
@@ -58,15 +59,138 @@ pub struct ProjectSummary {
 /// Project service implementation
 pub struct ProjectService;
 
+#[derive(Debug, Clone)]
+struct GitHubRepository {
+    owner: String,
+    name: String,
+    clone_url: String,
+}
+
 impl ProjectService {
-    fn validate_repository_path(path: &Path) -> ServiceResult<()> {
-        let raw = path.to_string_lossy();
-        if raw.contains("://") {
+    fn is_valid_repo_component(value: &str) -> bool {
+        !value.is_empty()
+            && value
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    }
+
+    fn parse_github_repository(input: &str) -> ServiceResult<Option<GitHubRepository>> {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
             return Err(ServiceError::validation(
-                "Repository URL detected. Clone locally and connect using the local folder path.",
+                "Repository path or URL cannot be empty",
             ));
         }
 
+        // HTTPS style: https://github.com/<owner>/<repo>[.git][/]
+        if let Some(rest) = trimmed.strip_prefix("https://github.com/") {
+            let mut parts = rest.trim_end_matches('/').split('/');
+            let owner = parts.next().unwrap_or_default();
+            let repo_raw = parts.next().unwrap_or_default();
+            let has_extra = parts.next().is_some();
+
+            let repo = repo_raw.trim_end_matches(".git");
+            if has_extra
+                || !Self::is_valid_repo_component(owner)
+                || !Self::is_valid_repo_component(repo)
+            {
+                return Err(ServiceError::validation(
+                    "Invalid GitHub repository URL format. Expected https://github.com/<owner>/<repo>",
+                ));
+            }
+
+            return Ok(Some(GitHubRepository {
+                owner: owner.to_string(),
+                name: repo.to_string(),
+                clone_url: format!("https://github.com/{owner}/{repo}.git"),
+            }));
+        }
+
+        // SSH style: git@github.com:<owner>/<repo>[.git]
+        if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+            let mut parts = rest.trim_end_matches('/').split('/');
+            let owner = parts.next().unwrap_or_default();
+            let repo_raw = parts.next().unwrap_or_default();
+            let has_extra = parts.next().is_some();
+
+            let repo = repo_raw.trim_end_matches(".git");
+            if has_extra
+                || !Self::is_valid_repo_component(owner)
+                || !Self::is_valid_repo_component(repo)
+            {
+                return Err(ServiceError::validation(
+                    "Invalid GitHub repository URL format. Expected git@github.com:<owner>/<repo>",
+                ));
+            }
+
+            return Ok(Some(GitHubRepository {
+                owner: owner.to_string(),
+                name: repo.to_string(),
+                clone_url: format!("https://github.com/{owner}/{repo}.git"),
+            }));
+        }
+
+        if trimmed.contains("://") || trimmed.starts_with("git@") {
+            return Err(ServiceError::validation(
+                "Only GitHub repository URLs are supported for auto-clone. Use a local path for other hosts.",
+            ));
+        }
+
+        Ok(None)
+    }
+
+    async fn clone_or_open_github_repository(
+        state: &Arc<DesktopStateManager>,
+        repo: GitHubRepository,
+    ) -> ServiceResult<PathBuf> {
+        let clones_dir = state.app_data_dir.join("cloned-repositories");
+        let destination = clones_dir.join(format!("{}-{}", repo.owner, repo.name));
+
+        if destination.exists() {
+            if destination.join(".git").exists() {
+                return Ok(destination);
+            }
+            return Err(ServiceError::validation(format!(
+                "Clone destination '{}' exists but is not a Git repository",
+                destination.display()
+            )));
+        }
+
+        tokio::fs::create_dir_all(&clones_dir)
+            .await
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        let clone_url = repo.clone_url.clone();
+        let destination_for_cmd = destination.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            Command::new("git")
+                .arg("clone")
+                .arg("--depth")
+                .arg("1")
+                .arg(clone_url)
+                .arg(&destination_for_cmd)
+                .output()
+        })
+        .await
+        .map_err(|e| ServiceError::internal(&e.to_string()))
+        .and_then(|result| result.map_err(|e| ServiceError::internal(&e.to_string())))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ServiceError::validation(format!(
+                "Failed to clone repository. {}",
+                if stderr.is_empty() {
+                    "Verify the URL and your network access."
+                } else {
+                    &stderr
+                }
+            )));
+        }
+
+        Ok(destination)
+    }
+
+    fn validate_repository_path(path: &Path) -> ServiceResult<()> {
         if !path.exists() {
             return Err(ServiceError::not_found(&format!(
                 "Repository path '{}'",
@@ -82,6 +206,19 @@ impl ProjectService {
         }
 
         Ok(())
+    }
+
+    /// Open a project from either a local path or supported GitHub URL.
+    pub async fn open_project_input(
+        state: &Arc<DesktopStateManager>,
+        input: &str,
+    ) -> ServiceResult<ProjectSummary> {
+        let resolved_path = match Self::parse_github_repository(input)? {
+            Some(repo) => Self::clone_or_open_github_repository(state, repo).await?,
+            None => PathBuf::from(input.trim()),
+        };
+
+        Self::open_project(state, resolved_path).await
     }
 
     /// Open a project at the given path
@@ -429,19 +566,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_open_project_rejects_repository_url() {
+    async fn test_open_project_input_rejects_unsupported_url_host() {
         let app_dir = tempdir().unwrap();
         let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
 
-        let result = ProjectService::open_project(
+        let result = ProjectService::open_project_input(
             &state,
-            PathBuf::from("https://github.com/rkendel1/multitenant.git"),
+            "https://gitlab.com/rkendel1/multitenant.git",
         )
         .await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert_eq!(err.code, ServiceErrorCode::ValidationError);
-        assert!(err.message.contains("Clone locally"));
+        assert!(err.message.contains("Only GitHub repository URLs are supported"));
+    }
+
+    #[test]
+    fn test_parse_github_repository_https_url() {
+        let parsed =
+            ProjectService::parse_github_repository("https://github.com/rkendel1/multitenant.git")
+                .unwrap();
+        let repo = parsed.expect("github url should parse");
+        assert_eq!(repo.owner, "rkendel1");
+        assert_eq!(repo.name, "multitenant");
+        assert_eq!(repo.clone_url, "https://github.com/rkendel1/multitenant.git");
     }
 }

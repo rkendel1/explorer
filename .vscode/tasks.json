@@ -158,6 +158,30 @@
 			"type": "shell",
 			"command": "cargo test -p api-desktop-app test_open_project_rejects_repository_url",
 			"problemMatcher": []
+		},
+		{
+			"label": "validate-github-url-open-rust",
+			"type": "shell",
+			"command": "cargo check -p api-desktop-app && cargo test -p api-desktop-app test_open_project_input_rejects_unsupported_url_host test_parse_github_repository_https_url",
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-github-url-open-frontend",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-unsupported-url-host",
+			"type": "shell",
+			"command": "cargo test -p api-desktop-app test_open_project_input_rejects_unsupported_url_host",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-parse-github-url",
+			"type": "shell",
+			"command": "cargo test -p api-desktop-app test_parse_github_repository_https_url",
+			"problemMatcher": []
 		}
 	]
 }

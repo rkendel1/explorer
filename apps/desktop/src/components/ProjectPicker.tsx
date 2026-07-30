@@ -39,11 +39,6 @@ function ProjectPicker({ onOpenProject, isOpening, error }: ProjectPickerProps) 
       return;
     }
 
-    if (path.includes('://')) {
-      setLocalError('Git URL detected. Clone the repository locally, then enter its local folder path.');
-      return;
-    }
-
     setLocalError(null);
     onOpenProject(path);
   };
@@ -101,7 +96,7 @@ function ProjectPicker({ onOpenProject, isOpening, error }: ProjectPickerProps) 
           {isOpening ? 'Opening...' : 'Connect Repository'}
         </button>
         <p className="path-hint">
-          Use a local folder path. GitHub URLs are not opened directly in this step.
+          Use a local folder path or a GitHub URL (for example https://github.com/owner/repo).
         </p>
       </div>
 
