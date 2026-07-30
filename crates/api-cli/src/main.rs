@@ -376,6 +376,26 @@ fn parse_http_method(method: &str) -> anyhow::Result<HttpMethod> {
     }
 }
 
+fn resolve_request_url(url: &str, environment: &api_core::ApiEnvironment) -> String {
+    let rendered = api_client::render_template(url, &environment.variables);
+    if rendered.starts_with("http://") || rendered.starts_with("https://") {
+        return rendered;
+    }
+
+    let base = environment
+        .variables
+        .get("baseUrl")
+        .cloned()
+        .unwrap_or_else(|| "http://127.0.0.1:4010".to_string());
+    let path = if rendered.starts_with('/') {
+        rendered
+    } else {
+        format!("/{rendered}")
+    };
+
+    format!("{}{}", base.trim_end_matches('/'), path)
+}
+
 fn resolve_runtime_base_url(repository: &Path) -> anyhow::Result<String> {
     let envs = api_storage::load_environments(repository)?;
     let environment = envs
@@ -481,7 +501,7 @@ async fn run_test_suite_file(
                 .await?
             } else if let Some(url) = saved.url.as_deref() {
                 let method = parse_http_method(&saved.method)?;
-                let rendered_url = api_client::render_template(url, &env.variables);
+                let rendered_url = resolve_request_url(url, &env);
                 api_client::execute_url_full(
                     repository,
                     method,
@@ -621,26 +641,55 @@ async fn main() -> anyhow::Result<()> {
             if let Some(cmd) = command {
                 match cmd {
                     RequestCommands::Save { name, repository } => {
+                        let request = match api_storage::load_effective_contract(&repository) {
+                            Ok(contract) if !contract.endpoints.is_empty() => {
+                                let endpoint = &contract.endpoints[0];
+                                api_storage::SavedRequest {
+                                    name: name.clone(),
+                                    method: endpoint.method.as_str().to_uppercase(),
+                                    url: None,
+                                    endpoint_id: Some(
+                                        endpoint
+                                            .operation_id
+                                            .clone()
+                                            .unwrap_or_else(|| endpoint.id.clone()),
+                                    ),
+                                    headers: None,
+                                    body: None,
+                                }
+                            }
+                            _ => {
+                                // Fallback request keeps onboarding unblocked for
+                                // repos with no discoverable API endpoints.
+                                api_storage::SavedRequest {
+                                    name: name.clone(),
+                                    method: "GET".to_string(),
+                                    url: Some("{{baseUrl}}/__api/health".to_string()),
+                                    endpoint_id: None,
+                                    headers: None,
+                                    body: None,
+                                }
+                            }
+                        };
+
+                        let request_file = api_storage::save_request(&repository, &request)?;
                         println!("Saved request: {}", name);
-                        // Save request to .repo-api/requests/saved/
-                        let save_path = repository.join(".repo-api/requests/saved");
-                        fs::create_dir_all(&save_path)?;
-                        let request_file = save_path.join(format!("{}.json", name));
-                        fs::write(&request_file, "{}")?;
                         println!("Request saved to: {}", request_file.display());
                     }
                     RequestCommands::List { repository } => {
-                        let requests_path = repository.join(".repo-api/requests/saved");
-                        if requests_path.exists() {
-                            println!("Saved requests:");
-                            for entry in fs::read_dir(&requests_path)? {
-                                let entry = entry?;
-                                if let Some(name) = entry.path().file_stem() {
-                                    println!("  {}", name.to_string_lossy());
-                                }
-                            }
-                        } else {
+                        let requests = api_storage::list_saved_requests(&repository)?;
+                        if requests.is_empty() {
                             println!("No saved requests found.");
+                        } else {
+                            println!("Saved requests:");
+                            for request in requests {
+                                let target = request
+                                    .endpoint_id
+                                    .clone()
+                                    .or(request.url.clone())
+                                    .unwrap_or_else(|| "(unconfigured)".to_string());
+                                println!("  {} -> {} {}", request.name, request.method, target);
+                            }
                         }
                     }
                     RequestCommands::Run {
@@ -653,13 +702,46 @@ async fn main() -> anyhow::Result<()> {
                             .into_iter()
                             .find(|e| e.name == environment)
                             .ok_or(api_core::ApiToolError::EnvironmentNotFound)?;
-                        // Load and execute saved request
-                        let request_file =
-                            repository.join(format!(".repo-api/requests/saved/{}.json", name));
-                        if !request_file.exists() {
-                            anyhow::bail!("Request '{}' not found", name);
-                        }
+
+                        let saved = api_storage::load_saved_request(&repository, &name)
+                            .map_err(|_| anyhow::anyhow!("Request '{}' not found", name))?;
+
                         println!("Running request: {} with environment: {}", name, env.name);
+
+                        let outcome = if let Some(endpoint_id) = saved.endpoint_id.as_deref() {
+                            let contract = api_storage::load_effective_contract(&repository)?;
+                            api_client::execute_endpoint_full(
+                                &repository,
+                                &contract,
+                                endpoint_id,
+                                &env,
+                                saved.headers.as_ref(),
+                                saved.body.clone(),
+                            )
+                            .await?
+                        } else if let Some(url) = saved.url.as_deref() {
+                            let method = parse_http_method(&saved.method)?;
+                            let rendered_url = resolve_request_url(url, &env);
+                            api_client::execute_url_full(
+                                &repository,
+                                method,
+                                &rendered_url,
+                                saved.headers.as_ref(),
+                                saved.body.clone(),
+                            )
+                            .await?
+                        } else {
+                            anyhow::bail!("saved request '{}' has no endpoint or url", name);
+                        };
+
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&serde_json::json!({
+                                "status": outcome.status,
+                                "headers": outcome.headers,
+                                "body": outcome.body,
+                            }))?
+                        );
                     }
                 }
             } else {
@@ -969,18 +1051,18 @@ scenarios:
                 }
             }
             EnvironmentCommands::Create { name, repository } => {
-                let envs_path = repository.join(".repo-api/environments");
-                fs::create_dir_all(&envs_path)?;
-                let env_file = envs_path.join(format!("{}.yaml", name));
-                let template = format!(
-                    r#"name: {}
-variables:
-  baseUrl:
-    value: http://127.0.0.1:4010
-"#,
-                    name
-                );
-                fs::write(&env_file, template)?;
+                let mut envs = api_storage::load_environments(&repository)?;
+                if envs.iter().any(|env| env.name == name) {
+                    anyhow::bail!("Environment '{}' already exists", name);
+                }
+                envs.push(api_core::ApiEnvironment {
+                    name: name.clone(),
+                    variables: BTreeMap::from([(
+                        String::from("baseUrl"),
+                        String::from("http://127.0.0.1:4010"),
+                    )]),
+                });
+                api_storage::save_environments(&repository, &envs)?;
                 println!("Created environment: {}", name);
             }
             EnvironmentCommands::Set {
@@ -990,30 +1072,25 @@ variables:
                 repository,
                 secret,
             } => {
-                let env_file = repository.join(format!(".repo-api/environments/{}.yaml", name));
-                if env_file.exists() {
-                    let content = fs::read_to_string(&env_file)?;
-                    // Simple append of new variable
-                    let new_var = if secret {
-                        format!("  {}:\n    value: \"{}\"\n    secret: true\n", key, value)
-                    } else {
-                        format!("  {}:\n    value: \"{}\"\n", key, value)
-                    };
-                    let updated = if content.contains(&format!("  {}:", key)) {
-                        println!("Updated variable: {} in environment: {}", key, name);
-                        content // Would need proper YAML editing
-                    } else {
-                        format!("{}{}", content, new_var)
-                    };
-                    fs::write(&env_file, updated)?;
+                let mut envs = api_storage::load_environments(&repository)?;
+                let env = envs
+                    .iter_mut()
+                    .find(|env| env.name == name)
+                    .ok_or_else(|| anyhow::anyhow!("Environment '{}' not found", name))?;
+
+                env.variables.insert(key.clone(), value.clone());
+                api_storage::save_environments(&repository, &envs)?;
+                println!(
+                    "Set {} = {} in environment: {}",
+                    key,
+                    if secret { "****" } else { &value },
+                    name
+                );
+
+                if secret {
                     println!(
-                        "Set {} = {} in environment: {}",
-                        key,
-                        if secret { "****" } else { &value },
-                        name
+                        "Note: environment variables are currently plain-text; use `repo-api vault set` for secret storage."
                     );
-                } else {
-                    anyhow::bail!("Environment '{}' not found", name);
                 }
             }
         },
@@ -1072,20 +1149,26 @@ variables:
         },
         Commands::Workflow { command } => match command {
             WorkflowCommands::List { repository } => {
-                let workflows = api_workflows::list_workflows(&repository)?;
+                let mut workflows = api_workflows::list_workflows(&repository)?;
                 if workflows.is_empty() {
-                    println!("No workflows found.");
-                } else {
-                    println!("Workflows:");
-                    for workflow in workflows {
-                        let completed = workflow.steps.iter().filter(|step| step.completed).count();
-                        println!(
-                            "  {} ({}/{})",
-                            workflow.name,
-                            completed,
-                            workflow.steps.len()
-                        );
-                    }
+                    let starter = api_workflows::create_workflow(
+                        &repository,
+                        "Getting Started",
+                        api_workflows::starter_workflow_steps(),
+                    )?;
+                    println!("No workflows found. Initialized starter workflow.");
+                    workflows.push(starter);
+                }
+
+                println!("Workflows:");
+                for workflow in workflows {
+                    let completed = workflow.steps.iter().filter(|step| step.completed).count();
+                    println!(
+                        "  {} ({}/{})",
+                        workflow.name,
+                        completed,
+                        workflow.steps.len()
+                    );
                 }
             }
             WorkflowCommands::Start { name, repository } => {

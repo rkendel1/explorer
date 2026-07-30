@@ -1,0 +1,139 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "onboarding-sequence-calories-repo",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- project show --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- scan /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- environment list --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- workflow list --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-blocker-probe",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- environment set mock baseUrl http://127.0.0.1:4012 --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- test --all --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-test-probe",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- test --all --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-mock-server",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- mock /Users/randy/Desktop/calories-tracker-local-only-app --port 4010",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-first-request-probe",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- request --repository /Users/randy/Desktop/calories-tracker-local-only-app --method GET --path /__api/health --environment mock",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-state-export",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- state export --output /Users/randy/Desktop/calories-tracker-local-only-app/.repo-api/snapshots/onboarding-state.json --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-request-save-probe",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- request save health --repository /Users/randy/Desktop/calories-tracker-local-only-app && cat /Users/randy/Desktop/calories-tracker-local-only-app/.repo-api/requests/saved/health.json",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-api-cli-after-onboarding-fixes",
+			"type": "shell",
+			"command": "cargo check -p api-cli",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-full-sequence-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- project show --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- scan /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- workflow list --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- environment set mock baseUrl http://127.0.0.1:4010 --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- request save health --repository /Users/randy/Desktop/calories-tracker-local-only-app && cargo run -p api-cli -- request run health --repository /Users/randy/Desktop/calories-tracker-local-only-app --environment mock && mkdir -p /Users/randy/Desktop/calories-tracker-local-only-app/.repo-api/tests/suites && cat > /Users/randy/Desktop/calories-tracker-local-only-app/.repo-api/tests/suites/onboarding.yaml <<'YAML'\nname: Onboarding Smoke\nenvironment: mock\ntests:\n  - request: health\n    assertions:\n      - type: status\n        equals: 200\nYAML\ncargo run -p api-cli -- test --suite onboarding --repository /Users/randy/Desktop/calories-tracker-local-only-app --environment mock",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-api-cli-url-resolver-fix",
+			"type": "shell",
+			"command": "cargo check -p api-cli",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-workflow-list-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- workflow list --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-env-set-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- environment set mock baseUrl http://127.0.0.1:4010 --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-request-save-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- request save health --repository /Users/randy/Desktop/calories-tracker-local-only-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-request-run-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- request run health --repository /Users/randy/Desktop/calories-tracker-local-only-app --environment mock",
+			"problemMatcher": []
+		},
+		{
+			"label": "onboarding-run-first-test-rerun",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- test --suite onboarding --repository /Users/randy/Desktop/calories-tracker-local-only-app --environment mock",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-clone-multitenant",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop && rm -rf multitenant && git clone https://github.com/rkendel1/multitenant.git",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-onboarding-pass1",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- project create multitenant --repository /Users/randy/Desktop/multitenant && cargo run -p api-cli -- scan /Users/randy/Desktop/multitenant && cargo run -p api-cli -- workflow list --repository /Users/randy/Desktop/multitenant && cargo run -p api-cli -- environment list --repository /Users/randy/Desktop/multitenant",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-set-env",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- environment set mock baseUrl http://127.0.0.1:4012 --repository /Users/randy/Desktop/multitenant",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-start-mock",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- mock /Users/randy/Desktop/multitenant --port 4012",
+			"isBackground": true,
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-onboarding-pass2",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- request --repository /Users/randy/Desktop/multitenant --method GET --path /__api/health --environment mock && cargo run -p api-cli -- state export --output /Users/randy/Desktop/multitenant/.repo-api/snapshots/onboarding-state.json --repository /Users/randy/Desktop/multitenant && cargo run -p api-cli -- state import /Users/randy/Desktop/multitenant/.repo-api/snapshots/onboarding-state.json --repository /Users/randy/Desktop/multitenant && cargo run -p api-cli -- request save health --repository /Users/randy/Desktop/multitenant && cargo run -p api-cli -- request run health --repository /Users/randy/Desktop/multitenant --environment mock",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-onboarding-test",
+			"type": "shell",
+			"command": "cargo run -p api-cli -- test --suite onboarding --repository /Users/randy/Desktop/multitenant --environment mock --report /Users/randy/Desktop/multitenant/.repo-api/tests/reports/onboarding-junit.xml",
+			"problemMatcher": []
+		},
+		{
+			"label": "baseline-multitenant-cleanup-mock",
+			"type": "shell",
+			"command": "pkill -f \"api-cli mock /Users/randy/Desktop/multitenant --port 4012\" || true",
+			"problemMatcher": []
+		}
+	]
+}
