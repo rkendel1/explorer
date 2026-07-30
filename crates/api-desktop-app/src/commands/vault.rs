@@ -1,39 +1,31 @@
 //! Vault commands
 
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-use api_vault::VaultState;
 
 use crate::VaultEntryMetadata;
+use crate::services::VaultService;
 
-use super::{AppState, CommandResult};
+use super::{AppState, CommandResult, from_service, state_handle};
 
 /// Create vault entry request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateVaultEntryRequest {
     pub name: String,
-    pub secret_type: String, // "api_key" | "bearer_token"
+    pub secret_type: String, // "api_key" | "bearer_token" | "basic_auth" | "oauth_token"
     pub value: String,       // This is the only place where secret values are accepted
-}
-
-/// Update vault entry request
-#[derive(Debug, Deserialize)]
-pub struct UpdateVaultEntryRequest {
-    pub id: String,
-    pub name: Option<String>,
-    pub value: Option<String>,
 }
 
 /// Delete vault entry request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteVaultEntryRequest {
-    pub id: String,
+    pub name: String,
 }
 
 /// Unlock vault request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UnlockVaultRequest {
     pub passphrase: Option<String>,
 }
@@ -42,169 +34,85 @@ pub struct UnlockVaultRequest {
 #[derive(Debug, Serialize)]
 pub struct VaultStateResponse {
     pub state: String,
+    pub entry_count: usize,
     pub auto_lock_seconds: Option<u64>,
 }
 
-/// Reveal secret request (requires explicit user action)
-#[derive(Debug, Deserialize)]
-pub struct RevealSecretRequest {
-    pub id: String,
+impl From<crate::services::vault_service::VaultStateInfo> for VaultStateResponse {
+    fn from(info: crate::services::vault_service::VaultStateInfo) -> Self {
+        Self {
+            state: match info.state {
+                api_vault::VaultState::Locked => "locked".to_string(),
+                api_vault::VaultState::Unlocking => "unlocking".to_string(),
+                api_vault::VaultState::Unlocked => "unlocked".to_string(),
+                api_vault::VaultState::Error => "error".to_string(),
+            },
+            entry_count: info.entry_count,
+            auto_lock_seconds: info.auto_lock_seconds,
+        }
+    }
 }
 
-/// Reveal secret response (value is auto-cleared after 30 seconds)
-#[derive(Debug, Serialize)]
-pub struct RevealSecretResponse {
-    pub id: String,
-    pub value: String,
-    pub expires_in_seconds: u64,
+fn vault_service() -> VaultService {
+    VaultService::new()
 }
 
 /// List vault entries
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_list(state: AppState<'_>) -> CommandResult<Vec<VaultEntryMetadata>> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    CommandResult::ok(Vec::new())
+    let state = state_handle(&state);
+    from_service(vault_service().list_entries(&state).await)
 }
 
 /// Create a vault entry
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_create(
     state: AppState<'_>,
     request: CreateVaultEntryRequest,
 ) -> CommandResult<VaultEntryMetadata> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    if state.get_vault_state().await != VaultState::Unlocked {
-        return CommandResult::unauthorized("Vault is locked");
-    }
-
-    let now = Utc::now();
-    let metadata = VaultEntryMetadata {
-        id: Uuid::new_v4().to_string(),
-        name: request.name,
-        secret_type: request.secret_type,
-        status: "available".to_string(),
-        created_at: now,
-        updated_at: now,
-    };
-
-    CommandResult::ok(metadata)
-}
-
-/// Update a vault entry
-pub async fn vault_update(
-    state: AppState<'_>,
-    request: UpdateVaultEntryRequest,
-) -> CommandResult<VaultEntryMetadata> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    if state.get_vault_state().await != VaultState::Unlocked {
-        return CommandResult::unauthorized("Vault is locked");
-    }
-
-    let now = Utc::now();
-    let metadata = VaultEntryMetadata {
-        id: request.id,
-        name: request.name.unwrap_or_default(),
-        secret_type: "bearer_token".to_string(),
-        status: "available".to_string(),
-        created_at: now,
-        updated_at: now,
-    };
-
-    CommandResult::ok(metadata)
+    let state = state_handle(&state);
+    from_service(
+        vault_service()
+            .create_entry(&state, &request.name, &request.secret_type, &request.value)
+            .await,
+    )
 }
 
 /// Delete a vault entry
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_delete(
     state: AppState<'_>,
-    _request: DeleteVaultEntryRequest,
-) -> CommandResult<()> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    if state.get_vault_state().await != VaultState::Unlocked {
-        return CommandResult::unauthorized("Vault is locked");
-    }
-
-    CommandResult::ok(())
+    request: DeleteVaultEntryRequest,
+) -> CommandResult<bool> {
+    let state = state_handle(&state);
+    from_service(vault_service().delete_entry(&state, &request.name).await)
 }
 
 /// Unlock the vault
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_unlock(
     state: AppState<'_>,
-    _request: UnlockVaultRequest,
+    request: UnlockVaultRequest,
 ) -> CommandResult<VaultStateResponse> {
-    // In production, this would derive key from keychain or passphrase
-    state.set_vault_state(VaultState::Unlocked).await;
-
-    CommandResult::ok(VaultStateResponse {
-        state: "unlocked".to_string(),
-        auto_lock_seconds: Some(900), // 15 minutes
-    })
+    let state = state_handle(&state);
+    from_service(
+        vault_service()
+            .unlock(&state, request.passphrase.as_deref())
+            .await,
+    )
+    .map(Into::into)
 }
 
 /// Lock the vault
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_lock(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
-    state.set_vault_state(VaultState::Locked).await;
-
-    CommandResult::ok(VaultStateResponse {
-        state: "locked".to_string(),
-        auto_lock_seconds: None,
-    })
+    let state = state_handle(&state);
+    from_service(vault_service().lock(&state).await).map(Into::into)
 }
 
 /// Get vault state
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn vault_state(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
-    let vault_state = state.get_vault_state().await;
-
-    CommandResult::ok(VaultStateResponse {
-        state: match vault_state {
-            VaultState::Locked => "locked".to_string(),
-            VaultState::Unlocking => "unlocking".to_string(),
-            VaultState::Unlocked => "unlocked".to_string(),
-            VaultState::Error => "error".to_string(),
-        },
-        auto_lock_seconds: if vault_state == VaultState::Unlocked {
-            Some(900)
-        } else {
-            None
-        },
-    })
-}
-
-/// Reveal a secret value (requires unlocked vault)
-pub async fn vault_reveal(
-    state: AppState<'_>,
-    request: RevealSecretRequest,
-) -> CommandResult<RevealSecretResponse> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    if state.get_vault_state().await != VaultState::Unlocked {
-        return CommandResult::unauthorized("Vault is locked");
-    }
-
-    CommandResult::ok(RevealSecretResponse {
-        id: request.id,
-        value: "[REVEALED_SECRET]".to_string(),
-        expires_in_seconds: 30,
-    })
+    let state = state_handle(&state);
+    from_service(vault_service().get_state(&state).await).map(Into::into)
 }

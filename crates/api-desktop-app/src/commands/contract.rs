@@ -2,141 +2,97 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{EndpointDetail, EndpointSummary, EvidenceInfo, ParameterInfo, ResponseInfo};
+use crate::services::ExplorerService;
+use crate::services::explorer_service::{EndpointFilter, SchemaDetail, SchemaSummary};
+use crate::{EndpointDetail, EndpointSummary};
 
-use super::{AppState, CommandResult};
+use super::{AppState, CommandResult, from_service, state_handle};
 
 /// Get endpoint request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GetEndpointRequest {
     pub id: String,
 }
 
-/// Schema summary
-#[derive(Debug, Clone, Serialize)]
-pub struct SchemaSummary {
-    pub name: String,
-    pub schema_type: String,
-    pub properties: Vec<String>,
+/// List endpoints request
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListEndpointsRequest {
+    #[serde(default)]
+    pub filter: Option<EndpointFilter>,
 }
 
-/// Get contract request
+/// Get schema request
 #[derive(Debug, Deserialize)]
-pub struct GetContractRequest {
-    pub format: Option<String>,
+#[serde(rename_all = "camelCase")]
+pub struct GetSchemaRequest {
+    pub name: String,
 }
 
 /// Contract response
 #[derive(Debug, Serialize)]
 pub struct ContractResponse {
-    pub version: String,
-    pub environment_count: usize,
     pub has_contract: bool,
+    pub endpoint_count: usize,
+    pub schema_count: usize,
 }
 
 /// List all endpoints
-pub async fn endpoint_list(state: AppState<'_>) -> CommandResult<Vec<EndpointSummary>> {
-    let project = state.project.read().await;
-
-    if let Some(project) = project.as_ref() {
-        // Generate sample endpoints based on environments
-        let endpoints: Vec<EndpointSummary> = project
-            .environments
-            .iter()
-            .enumerate()
-            .take(5)
-            .map(|(i, env)| EndpointSummary {
-                id: format!("endpoint-{}", i),
-                method: if i % 2 == 0 {
-                    "GET".to_string()
-                } else {
-                    "POST".to_string()
-                },
-                path: format!("/{}", env.name.to_lowercase().replace(' ', "-")),
-                summary: Some(format!("Endpoint for {}", env.name)),
-                confidence: 0.95,
-                tag: Some("default".to_string()),
-            })
-            .collect();
-
-        CommandResult::ok(endpoints)
-    } else {
-        CommandResult::error("No project open")
-    }
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn endpoint_list(
+    state: AppState<'_>,
+    request: Option<ListEndpointsRequest>,
+) -> CommandResult<Vec<EndpointSummary>> {
+    let state = state_handle(&state);
+    let filter = request.and_then(|r| r.filter);
+    from_service(ExplorerService::list_endpoints(&state, filter).await)
 }
 
 /// Get endpoint details
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn endpoint_get(
     state: AppState<'_>,
     request: GetEndpointRequest,
 ) -> CommandResult<EndpointDetail> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    let detail = EndpointDetail {
-        id: request.id.clone(),
-        method: "GET".to_string(),
-        path: "/example".to_string(),
-        summary: Some("Example endpoint".to_string()),
-        description: Some("An example endpoint for demonstration".to_string()),
-        parameters: vec![ParameterInfo {
-            name: "id".to_string(),
-            location: "path".to_string(),
-            required: true,
-            schema_type: "string".to_string(),
-        }],
-        request_body: None,
-        responses: vec![ResponseInfo {
-            status: 200,
-            content_type: Some("application/json".to_string()),
-            schema_ref: Some("#/components/schemas/Example".to_string()),
-        }],
-        security: vec!["bearerAuth".to_string()],
-        confidence: 0.95,
-        evidence: vec![EvidenceInfo {
-            file: "src/routes/example.ts".to_string(),
-            line_start: Some(10),
-            line_end: Some(25),
-        }],
-    };
-
-    CommandResult::ok(detail)
+    let state = state_handle(&state);
+    from_service(ExplorerService::get_endpoint(&state, &request.id).await)
 }
 
 /// List all schemas
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn schema_list(state: AppState<'_>) -> CommandResult<Vec<SchemaSummary>> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    let schemas = vec![SchemaSummary {
-        name: "Example".to_string(),
-        schema_type: "object".to_string(),
-        properties: vec!["id".to_string(), "name".to_string()],
-    }];
-
-    CommandResult::ok(schemas)
+    let state = state_handle(&state);
+    from_service(ExplorerService::list_schemas(&state).await)
 }
 
-/// Get the current contract
-pub async fn contract_get(
+/// Get schema detail
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn schema_get(
     state: AppState<'_>,
-    _request: GetContractRequest,
-) -> CommandResult<ContractResponse> {
-    let project = state.project.read().await;
+    request: GetSchemaRequest,
+) -> CommandResult<SchemaDetail> {
+    let state = state_handle(&state);
+    from_service(ExplorerService::get_schema(&state, &request.name).await)
+}
 
-    if let Some(project) = project.as_ref() {
-        CommandResult::ok(ContractResponse {
-            version: "1.0.0".to_string(),
-            environment_count: project.environments.len(),
-            has_contract: !project.contract.path.is_empty(),
-        })
-    } else {
-        CommandResult::error("No project open")
-    }
+/// Get the current contract summary
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn contract_get(state: AppState<'_>) -> CommandResult<ContractResponse> {
+    let state = state_handle(&state);
+    let endpoints = from_service(ExplorerService::list_endpoints(&state, None).await)?;
+    let schemas = from_service(ExplorerService::list_schemas(&state).await)?;
+
+    Ok(ContractResponse {
+        has_contract: !endpoints.is_empty() || !schemas.is_empty(),
+        endpoint_count: endpoints.len(),
+        schema_count: schemas.len(),
+    })
+}
+
+/// Trigger a contract re-scan
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn contract_rescan(state: AppState<'_>) -> CommandResult<usize> {
+    let state = state_handle(&state);
+    from_service(ExplorerService::refresh_contract(&state).await)
 }

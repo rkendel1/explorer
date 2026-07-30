@@ -29,7 +29,10 @@ pub fn normalize_path(path: &str) -> String {
     p
 }
 
-fn endpoint_key(method: &HttpMethod, path: &str) -> String {
+/// Stable key used to match endpoints across contracts when diffing
+/// (`{METHOD} {normalized_path}`). Exposed so callers can map a
+/// `diff_contracts` key back to the endpoint it refers to.
+pub fn endpoint_key(method: &HttpMethod, path: &str) -> String {
     format!(
         "{} {}",
         method.as_str().to_uppercase(),

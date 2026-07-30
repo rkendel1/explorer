@@ -1,18 +1,46 @@
 //! Application state management for the desktop app.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 
 use api_customer_journey::CustomerJourneyState;
 use api_projects::ApiProject;
+use api_runtime_events::RuntimeEvent;
 use api_vault::VaultState;
 use api_workflows::Workflow;
 use api_workflows::events::WorkflowCompletionEngine;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 
 use crate::{RecentProject, RuntimeState, RuntimeStatus};
+
+/// Maximum number of recent runtime events kept in memory for `get_events`.
+const MAX_BUFFERED_RUNTIME_EVENTS: usize = 200;
+
+/// Background tasks backing a running mock server: the server itself and the
+/// task pumping its events into `DesktopStateManager::runtime_events`. Both
+/// get aborted together on stop/restart.
+pub struct RunningMockServer {
+    pub server_task: JoinHandle<()>,
+    pub event_pump_task: JoinHandle<()>,
+}
+
+impl RunningMockServer {
+    /// Abort both tasks and wait for them to actually finish. `abort()`
+    /// alone only *requests* cancellation - the listening socket isn't
+    /// guaranteed to be closed (and the port released) until the aborted
+    /// task is actually polled and torn down, so callers that need the
+    /// port free immediately (e.g. a restart binding the same port) must
+    /// await this rather than fire-and-forget `abort()`.
+    pub async fn abort(self) {
+        self.server_task.abort();
+        self.event_pump_task.abort();
+        let _ = self.server_task.await;
+        let _ = self.event_pump_task.await;
+    }
+}
 
 /// Desktop application state manager
 pub struct DesktopStateManager {
@@ -34,6 +62,12 @@ pub struct DesktopStateManager {
     /// Runtime state
     pub runtime: RwLock<RuntimeState>,
 
+    /// Handles for the currently running mock server, if any
+    pub runtime_server: RwLock<Option<RunningMockServer>>,
+
+    /// Recent runtime events, most recent first (bounded ring buffer)
+    pub runtime_events: RwLock<VecDeque<RuntimeEvent>>,
+
     /// Workflows
     pub workflows: RwLock<Vec<Workflow>>,
 
@@ -48,6 +82,16 @@ pub struct DesktopStateManager {
 
     /// Customer journey state for progressive onboarding
     pub customer_journey: RwLock<Option<CustomerJourneyState>>,
+}
+
+impl DesktopStateManager {
+    /// Push a runtime event into the bounded buffer, evicting the oldest
+    /// entry once `MAX_BUFFERED_RUNTIME_EVENTS` is exceeded.
+    pub async fn push_runtime_event(&self, event: RuntimeEvent) {
+        let mut events = self.runtime_events.write().await;
+        events.push_front(event);
+        events.truncate(MAX_BUFFERED_RUNTIME_EVENTS);
+    }
 }
 
 /// Request history entry (secrets redacted)
@@ -71,6 +115,8 @@ impl DesktopStateManager {
             active_environment: RwLock::new(None),
             vault_state: RwLock::new(VaultState::Locked),
             runtime: RwLock::new(RuntimeState::default()),
+            runtime_server: RwLock::new(None),
+            runtime_events: RwLock::new(VecDeque::new()),
             workflows: RwLock::new(Vec::new()),
             workflow_engine: RwLock::new(None),
             recent_projects: RwLock::new(Vec::new()),

@@ -2,98 +2,67 @@
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::RecentProject;
+use crate::services::ProjectService;
+use crate::services::project_service::ProjectSummary;
 
-use super::{AppState, CommandResult};
+use super::{AppState, CommandResult, from_service, state_handle};
 
 /// Open project request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OpenProjectRequest {
     pub path: String,
 }
 
-/// Open project response
-#[derive(Debug, Serialize)]
-pub struct OpenProjectResponse {
-    pub name: String,
-    pub environment_count: usize,
-    pub has_contract: bool,
-}
-
 /// Create project request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateProjectRequest {
     pub path: String,
     pub name: Option<String>,
 }
 
 /// List recent projects
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_list(state: AppState<'_>) -> CommandResult<Vec<RecentProject>> {
-    match state.load_recent_projects().await {
-        Ok(projects) => CommandResult::ok(projects),
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    let state = state_handle(&state);
+    from_service(ProjectService::get_recent_projects(&state).await)
 }
 
 /// Open a project at the given path
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_open(
     state: AppState<'_>,
     request: OpenProjectRequest,
-) -> CommandResult<OpenProjectResponse> {
-    let path = PathBuf::from(&request.path);
-
-    match state.open_project(path).await {
-        Ok(project) => {
-            let response = OpenProjectResponse {
-                name: project.name.clone(),
-                environment_count: project.environments.len(),
-                has_contract: !project.contract.path.is_empty(),
-            };
-            CommandResult::ok(response)
-        }
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+) -> CommandResult<ProjectSummary> {
+    let state = state_handle(&state);
+    from_service(ProjectService::open_project(&state, PathBuf::from(&request.path)).await)
 }
 
-/// Create a new project
+/// Create a new project (currently identical to opening one - project
+/// creation happens implicitly the first time a path is opened)
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_create(
     state: AppState<'_>,
     request: CreateProjectRequest,
-) -> CommandResult<OpenProjectResponse> {
-    let path = PathBuf::from(&request.path);
-
-    // Use the existing project creation
-    match state.open_project(path).await {
-        Ok(project) => {
-            let response = OpenProjectResponse {
-                name: project.name.clone(),
-                environment_count: project.environments.len(),
-                has_contract: !project.contract.path.is_empty(),
-            };
-            CommandResult::ok(response)
-        }
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+) -> CommandResult<ProjectSummary> {
+    let state = state_handle(&state);
+    from_service(ProjectService::open_project(&state, PathBuf::from(&request.path)).await)
 }
 
 /// Close the current project
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_close(state: AppState<'_>) -> CommandResult<()> {
-    state.close_project().await;
-    CommandResult::ok(())
+    let state = state_handle(&state);
+    from_service(ProjectService::close_project(&state).await)
 }
 
 /// Remove a recent project from the list
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn project_remove_recent(state: AppState<'_>, path: String) -> CommandResult<()> {
-    let path = PathBuf::from(&path);
-    let mut projects = state.recent_projects.write().await;
-    projects.retain(|p| p.path != path);
-    drop(projects);
-
-    if let Err(e) = state.save_recent_projects().await {
-        return CommandResult::error(e.to_string());
-    }
-
-    CommandResult::ok(())
+    let state = state_handle(&state);
+    from_service(ProjectService::remove_from_recent(&state, PathBuf::from(&path)).await)
 }

@@ -1,40 +1,63 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { errorMessage } from '../lib/errors';
 import type { Project, Endpoint } from '../App';
 
 interface ExplorerProps {
   project: Project;
 }
 
+interface EndpointSummary {
+  id: string;
+  method: string;
+  path: string;
+  summary: string | null;
+  confidence: number;
+}
+
 function Explorer({ project }: ExplorerProps) {
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedEndpoint, setSelectedEndpoint] = useState<Endpoint | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isRescanning, setIsRescanning] = useState(false);
 
   useEffect(() => {
     loadEndpoints();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.path]);
 
   const loadEndpoints = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const result = await invoke<{ ok: Endpoint[] }>('endpoint_list', {
-        projectPath: project.path,
-      });
-      if (result.ok) {
-        setEndpoints(result.ok);
-      }
-    } catch (error) {
-      console.error('Failed to load endpoints:', error);
-      // Mock data for development
-      setEndpoints([
-        { id: '1', method: 'GET', path: '/work-orders', description: 'List work orders' },
-        { id: '2', method: 'POST', path: '/work-orders', description: 'Create a work order' },
-        { id: '3', method: 'GET', path: '/work-orders/{id}', description: 'Get work order by ID' },
-        { id: '4', method: 'PATCH', path: '/work-orders/{id}', description: 'Update work order' },
-        { id: '5', method: 'DELETE', path: '/work-orders/{id}', description: 'Delete work order' },
-        { id: '6', method: 'GET', path: '/customers', description: 'List customers' },
-        { id: '7', method: 'POST', path: '/customers', description: 'Create customer' },
-      ]);
+      const result = await invoke<EndpointSummary[]>('endpoint_list', { request: null });
+      setEndpoints(
+        result.map((ep) => ({
+          id: ep.id,
+          method: ep.method,
+          path: ep.path,
+          description: ep.summary ?? undefined,
+        }))
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRescan = async () => {
+    setIsRescanning(true);
+    setError(null);
+    try {
+      await invoke('contract_rescan');
+      await loadEndpoints();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsRescanning(false);
     }
   };
 
@@ -48,17 +71,29 @@ function Explorer({ project }: ExplorerProps) {
     <div>
       <h2>API Explorer</h2>
       <p style={{ color: '#6c757d', marginBottom: '1rem' }}>
-        {endpoints.length} endpoints • {project.schemaCount ?? 0} schemas
+        {isLoading ? 'Loading...' : `${endpoints.length} endpoints discovered`}
       </p>
 
-      <input
-        type="text"
-        placeholder="Search endpoints..."
-        value={searchQuery}
-        onChange={(e) => setSearchQuery(e.target.value)}
-        className="url-input"
-        style={{ marginBottom: '1rem', maxWidth: '400px' }}
-      />
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <input
+          type="text"
+          placeholder="Search endpoints..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="url-input"
+          style={{ maxWidth: '400px' }}
+        />
+        <button className="control-button" onClick={handleRescan} disabled={isRescanning}>
+          {isRescanning ? 'Rescanning...' : 'Rescan'}
+        </button>
+      </div>
 
       <div className="endpoint-list">
         {filteredEndpoints.map((endpoint) => (
@@ -73,6 +108,11 @@ function Explorer({ project }: ExplorerProps) {
             <span>{endpoint.path}</span>
           </div>
         ))}
+        {!isLoading && filteredEndpoints.length === 0 && (
+          <div style={{ padding: '2rem', textAlign: 'center', color: '#6c757d' }}>
+            No endpoints found. Try Rescan if you've changed the repository.
+          </div>
+        )}
       </div>
 
       {selectedEndpoint && (
@@ -83,17 +123,9 @@ function Explorer({ project }: ExplorerProps) {
             </span>
             {selectedEndpoint.path}
           </h3>
-          <p style={{ color: '#6c757d', marginTop: '0.5rem' }}>{selectedEndpoint.description}</p>
-          
-          <div style={{ marginTop: '1rem' }}>
-            <h4 style={{ fontSize: '0.875rem', marginBottom: '0.5rem' }}>Source Evidence</h4>
-            <p style={{ fontSize: '0.875rem', color: '#6c757d' }}>
-              Discovered from source code analysis
-            </p>
-            <p style={{ fontSize: '0.875rem', color: '#6c757d' }}>
-              Confidence: <strong>96%</strong>
-            </p>
-          </div>
+          {selectedEndpoint.description && (
+            <p style={{ color: '#6c757d', marginTop: '0.5rem' }}>{selectedEndpoint.description}</p>
+          )}
         </div>
       )}
     </div>

@@ -103,7 +103,8 @@ impl ProjectService {
         )
         .await;
 
-        if let Ok(contract) = api_storage::load_effective_contract(&path)
+        let contract = super::contract_service::ensure_contract(&path).await.ok();
+        if let Some(contract) = &contract
             && !contract.endpoints.is_empty()
         {
             let _ = CustomerJourneyService::complete_outcome(
@@ -112,12 +113,16 @@ impl ProjectService {
             )
             .await;
         }
+        let (endpoint_count, schema_count) = contract
+            .as_ref()
+            .map(|c| (c.endpoints.len(), c.schemas.schemas.len()))
+            .unwrap_or((0, 0));
 
         Ok(ProjectSummary {
             name: project.name,
             path,
-            endpoint_count: 0, // Will be populated after discovery
-            schema_count: 0,
+            endpoint_count,
+            schema_count,
             environment_count: project.environments.len(),
             has_contract: !project.contract.path.is_empty(),
             workflow_progress,

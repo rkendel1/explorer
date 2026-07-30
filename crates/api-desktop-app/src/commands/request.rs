@@ -1,29 +1,47 @@
 //! Request execution commands
 
 use std::collections::HashMap;
-use std::time::Instant;
 
-use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use serde::Deserialize;
 
-use crate::state::RequestHistoryEntry;
-use crate::{RequestResult, ValidationResult};
+use crate::RequestResult;
+use crate::services::RequestService;
+use crate::services::request_service::{
+    ExecuteRequestInput as ServiceExecuteRequestInput, RequestHistoryItem, SavedRequestInfo,
+};
+use crate::services::vault_service::AuthenticationConfig;
 
-use super::{AppState, CommandResult};
+use super::{AppState, CommandResult, from_service, state_handle};
 
 /// Execute request input
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExecuteRequestInput {
     pub method: String,
     pub url: String,
     pub headers: Option<HashMap<String, String>>,
     pub body: Option<serde_json::Value>,
     pub environment_id: Option<String>,
+    #[serde(default)]
+    pub authentication: Option<AuthenticationConfig>,
+}
+
+impl From<ExecuteRequestInput> for ServiceExecuteRequestInput {
+    fn from(input: ExecuteRequestInput) -> Self {
+        Self {
+            method: input.method,
+            url: input.url,
+            headers: input.headers,
+            body: input.body,
+            environment_id: input.environment_id,
+            authentication: input.authentication,
+        }
+    }
 }
 
 /// Save request input
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SaveRequestInput {
     pub name: String,
     pub method: String,
@@ -32,131 +50,82 @@ pub struct SaveRequestInput {
     pub body: Option<serde_json::Value>,
 }
 
-/// Saved request output
-#[derive(Debug, Serialize)]
-pub struct SavedRequest {
-    pub id: String,
-    pub name: String,
-    pub method: String,
-    pub url: String,
-}
-
 /// Delete request input
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeleteRequestInput {
     pub id: String,
 }
 
 /// Execute a request
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_execute(
     state: AppState<'_>,
     request: ExecuteRequestInput,
 ) -> CommandResult<RequestResult> {
-    let project = state.project.read().await;
-
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-    let project = project.as_ref().unwrap();
-
-    let start = Instant::now();
-
-    // For now, return a mock response
-    // In production, this would use api_client::execute_request
-    let duration = start.elapsed();
-
-    let result = RequestResult {
-        status: 200,
-        duration_ms: duration.as_millis() as u64 + 50,
-        body_size: 100,
-        headers: vec![
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("X-Request-Id".to_string(), Uuid::new_v4().to_string()),
-        ],
-        body: serde_json::json!({
-            "success": true,
-            "message": "Request executed successfully"
-        }),
-        validation: ValidationResult {
-            valid: true,
-            issues: vec![],
-        },
-    };
-
-    // Add to history with secrets redacted
-    let redacted_url = request.url.clone();
-    let history_entry = RequestHistoryEntry {
-        id: Uuid::new_v4().to_string(),
-        method: request.method.clone(),
-        url: redacted_url,
-        status: result.status,
-        duration_ms: result.duration_ms,
-        timestamp: Utc::now(),
-    };
-    state
-        .add_request_history(&project.name, history_entry)
-        .await;
-
-    CommandResult::ok(result)
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    let output = from_service(service.execute(&state, request.into()).await)?;
+    Ok(RequestResult {
+        status: output.status,
+        duration_ms: output.duration_ms,
+        body_size: output.body_size,
+        headers: output.headers,
+        body: output.body,
+        validation: output.validation,
+    })
 }
 
 /// Save a request for later
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_save(
     state: AppState<'_>,
     request: SaveRequestInput,
-) -> CommandResult<SavedRequest> {
-    let project = state.project.read().await;
+) -> CommandResult<SavedRequestInfo> {
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    from_service(
+        service
+            .save_request(
+                &state,
+                &request.name,
+                &request.method,
+                &request.url,
+                request.headers,
+                request.body,
+            )
+            .await,
+    )
+}
 
-    if project.is_none() {
-        return CommandResult::error("No project open");
-    }
-
-    let saved = SavedRequest {
-        id: Uuid::new_v4().to_string(),
-        name: request.name,
-        method: request.method,
-        url: request.url,
-    };
-
-    CommandResult::ok(saved)
+/// List saved requests
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn request_saved_list(state: AppState<'_>) -> CommandResult<Vec<SavedRequestInfo>> {
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    from_service(service.list_saved(&state).await)
 }
 
 /// Get request history
-pub async fn request_history(state: AppState<'_>) -> CommandResult<Vec<RequestHistoryEntry>> {
-    let project = state.project.read().await;
-
-    if let Some(project) = project.as_ref() {
-        let history = state.get_request_history(&project.name).await;
-        CommandResult::ok(history)
-    } else {
-        CommandResult::error("No project open")
-    }
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn request_history(state: AppState<'_>) -> CommandResult<Vec<RequestHistoryItem>> {
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    from_service(service.get_history(&state).await)
 }
 
 /// Delete a request from history
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_delete(state: AppState<'_>, request: DeleteRequestInput) -> CommandResult<()> {
-    let project = state.project.read().await;
-
-    if let Some(project) = project.as_ref() {
-        let mut history = state.request_history.write().await;
-        if let Some(entries) = history.get_mut(&project.name) {
-            entries.retain(|e| e.id != request.id);
-        }
-        CommandResult::ok(())
-    } else {
-        CommandResult::error("No project open")
-    }
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    from_service(service.delete_history_entry(&state, &request.id).await)
 }
 
 /// Clear all request history for the current project
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn request_history_clear(state: AppState<'_>) -> CommandResult<()> {
-    let project = state.project.read().await;
-
-    if let Some(project) = project.as_ref() {
-        let mut history = state.request_history.write().await;
-        history.remove(&project.name);
-        CommandResult::ok(())
-    } else {
-        CommandResult::error("No project open")
-    }
+    let state = state_handle(&state);
+    let service = RequestService::new();
+    from_service(service.clear_history(&state).await)
 }

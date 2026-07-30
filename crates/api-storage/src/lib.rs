@@ -124,6 +124,71 @@ pub fn save_environments(root: &Path, envs: &[ApiEnvironment]) -> anyhow::Result
     Ok(())
 }
 
+/// A request saved for reuse (and referenced by test suites via `request_id`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedRequest {
+    pub name: String,
+    pub method: String,
+    /// Raw URL/path to execute; used when `endpoint_id` is absent.
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Endpoint id (or operation id) to execute against the compiled contract.
+    #[serde(default)]
+    pub endpoint_id: Option<String>,
+    #[serde(default)]
+    pub headers: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
+}
+
+fn saved_requests_dir(root: &Path) -> PathBuf {
+    root.join(".repo-api/requests/saved")
+}
+
+pub fn save_request(root: &Path, request: &SavedRequest) -> anyhow::Result<PathBuf> {
+    let dir = saved_requests_dir(root);
+    fs::create_dir_all(&dir)?;
+    let file = dir.join(format!("{}.json", request.name));
+    fs::write(&file, serde_json::to_vec_pretty(request)?)?;
+    Ok(file)
+}
+
+pub fn load_saved_request(root: &Path, name: &str) -> anyhow::Result<SavedRequest> {
+    let file = saved_requests_dir(root).join(format!("{name}.json"));
+    Ok(serde_json::from_slice(&fs::read(file)?)?)
+}
+
+pub fn list_saved_requests(root: &Path) -> anyhow::Result<Vec<SavedRequest>> {
+    let dir = saved_requests_dir(root);
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut requests = Vec::new();
+    for entry in fs::read_dir(&dir)? {
+        let entry = entry?;
+        if entry.path().extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(bytes) = fs::read(entry.path())
+            && let Ok(request) = serde_json::from_slice::<SavedRequest>(&bytes)
+        {
+            requests.push(request);
+        }
+    }
+    requests.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(requests)
+}
+
+pub fn delete_saved_request(root: &Path, name: &str) -> anyhow::Result<bool> {
+    let file = saved_requests_dir(root).join(format!("{name}.json"));
+    if file.exists() {
+        fs::remove_file(file)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 pub fn append_request_history(root: &Path, entry: &serde_json::Value) -> anyhow::Result<()> {
     let file = root.join(".repo-api/history/requests.jsonl");
     fs::create_dir_all(file.parent().expect("parent"))?;

@@ -14,6 +14,7 @@
 //! - `api-testing` for API testing
 
 pub mod changes_service;
+pub mod contract_service;
 pub mod customer_journey_service;
 pub mod environment_service;
 pub mod explorer_service;
@@ -211,5 +212,46 @@ pub(crate) mod test_helpers {
             active_environment: Some("mock".to_string()),
             active_runtime_profile: Some("profile_mock".to_string()),
         }
+    }
+
+    /// Bind an ephemeral local port and answer a single request with a
+    /// canned 200 JSON response, so request-execution tests can hit a real
+    /// socket instead of relying on a mock/stub response.
+    pub async fn spawn_test_server() -> String {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = socket.read(&mut buf).await;
+                let body = r#"{"status":"ok"}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+            }
+        });
+
+        format!("http://{addr}")
+    }
+
+    /// Persist a "mock" environment pointing `baseUrl` at `base_url`.
+    pub async fn seed_mock_environment(root: &Path, base_url: &str) {
+        api_storage::save_environments(
+            root,
+            &[api_core::ApiEnvironment {
+                name: "mock".to_string(),
+                variables: std::collections::BTreeMap::from([(
+                    "baseUrl".to_string(),
+                    base_url.to_string(),
+                )]),
+            }],
+        )
+        .unwrap();
     }
 }

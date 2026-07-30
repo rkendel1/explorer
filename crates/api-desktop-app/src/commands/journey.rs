@@ -3,21 +3,23 @@ use serde::{Deserialize, Serialize};
 use api_customer_journey::{CustomerGoal, CustomerJourney, DeferredAction, JourneyOutcome};
 
 use crate::services::CustomerJourneyService;
-use crate::state::DesktopStateManager;
 
-use super::{AppState, CommandResult};
+use super::{AppState, CommandError, CommandResult, from_service, state_handle};
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SelectGoalRequest {
     pub goal: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompleteOutcomeRequest {
     pub outcome: String,
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DeferActionRequest {
     pub id: String,
     pub title: String,
@@ -55,54 +57,39 @@ fn parse_outcome(value: &str) -> Option<JourneyOutcome> {
     }
 }
 
-#[cfg(feature = "tauri")]
-fn state_handle(state: &AppState<'_>) -> std::sync::Arc<DesktopStateManager> {
-    state.inner().clone()
-}
-
-#[cfg(not(feature = "tauri"))]
-fn state_handle(state: &AppState<'_>) -> std::sync::Arc<DesktopStateManager> {
-    state.clone()
-}
-
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn journey_get(state: AppState<'_>) -> CommandResult<CustomerJourney> {
     let state = state_handle(&state);
-    match CustomerJourneyService::get(&state).await {
-        Ok(journey) => CommandResult::ok(journey),
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    from_service(CustomerJourneyService::get(&state).await)
 }
 
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn journey_select_goal(
     state: AppState<'_>,
     request: SelectGoalRequest,
 ) -> CommandResult<CustomerJourney> {
     let Some(goal) = parse_goal(&request.goal) else {
-        return CommandResult::validation_error("Unknown customer goal");
+        return Err(CommandError::validation_error("Unknown customer goal"));
     };
 
     let state = state_handle(&state);
-    match CustomerJourneyService::select_goal(&state, goal).await {
-        Ok(journey) => CommandResult::ok(journey),
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    from_service(CustomerJourneyService::select_goal(&state, goal).await)
 }
 
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn journey_complete_outcome(
     state: AppState<'_>,
     request: CompleteOutcomeRequest,
 ) -> CommandResult<CustomerJourney> {
     let Some(outcome) = parse_outcome(&request.outcome) else {
-        return CommandResult::validation_error("Unknown journey outcome");
+        return Err(CommandError::validation_error("Unknown journey outcome"));
     };
 
     let state = state_handle(&state);
-    match CustomerJourneyService::complete_outcome(&state, outcome).await {
-        Ok(journey) => CommandResult::ok(journey),
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    from_service(CustomerJourneyService::complete_outcome(&state, outcome).await)
 }
 
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn journey_defer_action(
     state: AppState<'_>,
     request: DeferActionRequest,
@@ -114,23 +101,17 @@ pub async fn journey_defer_action(
     };
 
     let state = state_handle(&state);
-    match CustomerJourneyService::defer_action(&state, action).await {
-        Ok(journey) => CommandResult::ok(journey),
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    from_service(CustomerJourneyService::defer_action(&state, action).await)
 }
 
+#[cfg_attr(feature = "tauri", tauri::command)]
 pub async fn journey_progress(state: AppState<'_>) -> CommandResult<JourneyProgressResponse> {
     let state = state_handle(&state);
-    match CustomerJourneyService::get_state(&state).await {
-        Ok(state) => {
-            let progress = state.progress();
-            CommandResult::ok(JourneyProgressResponse {
-                completed: progress.completed,
-                total: progress.total,
-                is_complete: state.is_complete(),
-            })
-        }
-        Err(e) => CommandResult::error(e.to_string()),
-    }
+    let journey_state = from_service(CustomerJourneyService::get_state(&state).await)?;
+    let progress = journey_state.progress();
+    Ok(JourneyProgressResponse {
+        completed: progress.completed,
+        total: progress.total,
+        is_complete: journey_state.is_complete(),
+    })
 }

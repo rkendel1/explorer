@@ -6,12 +6,16 @@
 //! - Accept/reject workflow
 //! - Effective contract updates
 
+use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 
+use api_compiler::DiffKind;
+use api_core::ApiContract;
 use serde::{Deserialize, Serialize};
 
-use crate::ContractChangeSummary;
 use crate::state::DesktopStateManager;
+use crate::{ChangeEntry, ContractChangeSummary};
 
 use super::{ServiceError, ServiceResult};
 
@@ -63,61 +67,195 @@ pub struct ChangeReviewResult {
 pub struct ChangesService;
 
 impl ChangesService {
-    /// List all pending contract changes
+    /// Load the generated (freshly discovered) contract, if one exists.
+    fn load_generated(root: &Path) -> Option<ApiContract> {
+        let bytes = std::fs::read(root.join(".repo-api/contract/generated.json")).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Diff the effective (current/accepted) contract against the generated
+    /// (freshly discovered) one, grouping the resulting `DiffKind`s by
+    /// endpoint key. Returns `(generated, effective, by_key)`; `by_key` is
+    /// empty if there's no generated contract to compare against yet.
+    fn diff(
+        root: &Path,
+    ) -> ServiceResult<(ApiContract, ApiContract, BTreeMap<String, Vec<DiffKind>>)> {
+        let effective = api_storage::load_effective_contract(root)
+            .map_err(|_| ServiceError::not_found("Effective contract"))?;
+
+        let Some(generated) = Self::load_generated(root) else {
+            return Ok((effective.clone(), effective, BTreeMap::new()));
+        };
+
+        let mut by_key: BTreeMap<String, Vec<DiffKind>> = BTreeMap::new();
+        for (key, kind) in api_compiler::diff_contracts(&effective, &generated) {
+            if key == "no-change" {
+                continue;
+            }
+            by_key.entry(key).or_default().push(kind);
+        }
+
+        Ok((generated, effective, by_key))
+    }
+
+    fn primary_classification(kinds: &[DiffKind]) -> ChangeClassification {
+        if kinds.contains(&DiffKind::Removed) {
+            ChangeClassification::Removed
+        } else if kinds.contains(&DiffKind::Added) {
+            ChangeClassification::Added
+        } else if kinds.contains(&DiffKind::Modified) {
+            ChangeClassification::Modified
+        } else {
+            ChangeClassification::Uncertain
+        }
+    }
+
+    /// List all pending contract changes (diff of effective vs. generated)
     pub async fn list(state: &Arc<DesktopStateManager>) -> ServiceResult<ContractChangeSummary> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        let root = state.active_root.read().await;
-        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        // Try to load generated and effective contracts to compare
-        let _generated = api_storage::load_effective_contract(root);
+        let (_, _, by_key) = Self::diff(&root)?;
 
-        // In production, this would compare generated vs effective
-        // and produce a diff
+        let mut added = Vec::new();
+        let mut modified = Vec::new();
+        let mut removed = Vec::new();
+        let mut potentially_breaking = Vec::new();
+
+        for (key, kinds) in &by_key {
+            let classification = Self::primary_classification(kinds);
+            let entry = ChangeEntry {
+                kind: format!("{:?}", classification).to_lowercase(),
+                description: format!("{:?} endpoint: {}", classification, key),
+                path: Some(key.clone()),
+            };
+            match classification {
+                ChangeClassification::Added => added.push(entry.clone()),
+                ChangeClassification::Removed => removed.push(entry.clone()),
+                ChangeClassification::Modified => modified.push(entry.clone()),
+                _ => {}
+            }
+            if kinds.contains(&DiffKind::Breaking) {
+                potentially_breaking.push(entry);
+            }
+        }
+
         Ok(ContractChangeSummary {
-            total_changes: 0,
-            added: Vec::new(),
-            modified: Vec::new(),
-            removed: Vec::new(),
-            potentially_breaking: Vec::new(),
+            total_changes: by_key.len(),
+            added,
+            modified,
+            removed,
+            potentially_breaking,
         })
     }
 
-    /// Get change detail
+    /// Get change detail for a single endpoint key (as produced by `list`)
     pub async fn get(
         state: &Arc<DesktopStateManager>,
-        _change_id: &str,
+        change_id: &str,
     ) -> ServiceResult<ChangeDetail> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        // In production, this would load the specific change
-        Err(ServiceError::not_found("Change"))
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let (generated, effective, by_key) = Self::diff(&root)?;
+        let kinds = by_key
+            .get(change_id)
+            .ok_or_else(|| ServiceError::not_found(&format!("Change '{change_id}'")))?;
+
+        let before = effective
+            .endpoints
+            .iter()
+            .find(|e| api_compiler::endpoint_key(&e.method, &e.path) == change_id)
+            .and_then(|e| serde_json::to_value(e).ok());
+        let after = generated
+            .endpoints
+            .iter()
+            .find(|e| api_compiler::endpoint_key(&e.method, &e.path) == change_id)
+            .and_then(|e| serde_json::to_value(e).ok());
+
+        let classification = Self::primary_classification(kinds);
+        let is_breaking = kinds.contains(&DiffKind::Breaking);
+
+        let mut detail = ChangeDetail {
+            id: change_id.to_string(),
+            classification,
+            description: format!("{:?} endpoint: {}", classification, change_id),
+            path: Some(change_id.to_string()),
+            before,
+            after,
+            is_breaking,
+            impact_analysis: String::new(),
+            suggested_action: if is_breaking {
+                "Review carefully before accepting".to_string()
+            } else {
+                "Safe to accept".to_string()
+            },
+        };
+        detail.impact_analysis = Self::analyze_impact(&detail);
+        Ok(detail)
     }
 
-    /// Accept a change (update effective contract)
+    /// Accept a change: apply that endpoint's generated definition into the
+    /// effective contract (or remove it, for a `Removed` change).
     pub async fn accept(
         state: &Arc<DesktopStateManager>,
         change_id: &str,
     ) -> ServiceResult<ChangeReviewResult> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        // In production, this would:
-        // 1. Apply the change to effective contract
-        // 2. Persist the decision
-        // 3. Emit workflow event
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let (generated, mut effective, by_key) = Self::diff(&root)?;
+        let kinds = by_key
+            .get(change_id)
+            .ok_or_else(|| ServiceError::not_found(&format!("Change '{change_id}'")))?;
+
+        if kinds.contains(&DiffKind::Removed) {
+            effective
+                .endpoints
+                .retain(|e| api_compiler::endpoint_key(&e.method, &e.path) != change_id);
+        } else if let Some(new_endpoint) = generated
+            .endpoints
+            .iter()
+            .find(|e| api_compiler::endpoint_key(&e.method, &e.path) == change_id)
+        {
+            effective
+                .endpoints
+                .retain(|e| api_compiler::endpoint_key(&e.method, &e.path) != change_id);
+            effective.endpoints.push(new_endpoint.clone());
+        }
+
+        api_storage::save_effective_contract(&root, &effective)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
 
         Ok(ChangeReviewResult {
             change_id: change_id.to_string(),
@@ -127,22 +265,29 @@ impl ChangesService {
         })
     }
 
-    /// Reject a change (keep current contract)
+    /// Reject a change (leave the effective contract as-is)
     pub async fn reject(
         state: &Arc<DesktopStateManager>,
         change_id: &str,
         _reason: Option<&str>,
     ) -> ServiceResult<ChangeReviewResult> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        // In production, this would:
-        // 1. Record the rejection with reason
-        // 2. Persist the decision
-        // 3. Possibly mark for future review
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let (_, _, by_key) = Self::diff(&root)?;
+        if !by_key.contains_key(change_id) {
+            return Err(ServiceError::not_found(&format!("Change '{change_id}'")));
+        }
 
         Ok(ChangeReviewResult {
             change_id: change_id.to_string(),
@@ -152,46 +297,50 @@ impl ChangesService {
         })
     }
 
-    /// Accept all pending changes
+    /// Accept all pending changes (replace effective with generated wholesale)
     pub async fn accept_all(state: &Arc<DesktopStateManager>) -> ServiceResult<usize> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        let root = state.active_root.read().await;
-        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        // In production, this would:
-        // 1. Replace effective with generated
-        // 2. Clear pending changes
-        // 3. Emit workflow event
+        let (generated, _, by_key) = Self::diff(&root)?;
+        let count = by_key.len();
 
-        // Try to copy generated to effective if it exists
-        let generated_path = root.join(".repo-api/contract/generated.json");
-        let effective_path = root.join(".repo-api/contract/effective.json");
-
-        if generated_path.exists() {
-            std::fs::copy(&generated_path, &effective_path)
+        if count > 0 {
+            api_storage::save_effective_contract(&root, &generated)
                 .map_err(|e| ServiceError::internal(&e.to_string()))?;
         }
 
-        Ok(0)
+        Ok(count)
     }
 
-    /// Keep current contract (reject all changes)
+    /// Keep current contract (reject all changes) - a no-op on the effective
+    /// contract, returning how many pending changes were dismissed.
     pub async fn keep_current(state: &Arc<DesktopStateManager>) -> ServiceResult<usize> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        // In production, this would clear all pending changes
-        // without updating effective contract
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        Ok(0)
+        let (_, _, by_key) = Self::diff(&root)?;
+        Ok(by_key.len())
     }
 
     /// Classify a change as breaking or non-breaking
@@ -276,8 +425,49 @@ mod tests {
         assert!(result.is_err());
     }
 
+    fn contract_with_endpoint(path: &str) -> ApiContract {
+        use api_core::{
+            ApiEndpoint, ApiMetadata, Confidence, ConfidenceLevel, EvidenceIndex, HttpMethod,
+            SchemaRegistry, SecurityRequirement,
+        };
+
+        ApiContract {
+            version: "1".into(),
+            metadata: ApiMetadata {
+                title: "t".into(),
+                version: "1".into(),
+                repository_root: None,
+            },
+            servers: vec![],
+            endpoints: vec![ApiEndpoint {
+                id: format!("ep-{path}"),
+                operation_id: None,
+                method: HttpMethod::GET,
+                path: path.to_string(),
+                summary: None,
+                parameters: vec![],
+                request_bodies: vec![],
+                responses: vec![],
+                security: SecurityRequirement { schemes: vec![] },
+                confidence: Confidence {
+                    level: ConfidenceLevel::High,
+                    score: 1.0,
+                },
+                evidence: vec![],
+            }],
+            schemas: SchemaRegistry::default(),
+            security_schemes: vec![],
+            diagnostics: vec![],
+            evidence: EvidenceIndex {
+                endpoint_evidence: vec![],
+                schema_evidence: vec![],
+                security_evidence: vec![],
+            },
+        }
+    }
+
     #[tokio::test]
-    async fn test_accept_change() {
+    async fn test_list_and_accept_real_diff() {
         let app_dir = tempdir().unwrap();
         let project_dir = tempdir().unwrap();
 
@@ -287,8 +477,32 @@ mod tests {
             project_dir.path(),
         ));
 
-        let result = ChangesService::accept(&state, "change-1").await.unwrap();
+        // Effective (current) has /users; generated (freshly scanned) adds /orders.
+        let effective = contract_with_endpoint("/users");
+        let mut generated = effective.clone();
+        generated
+            .endpoints
+            .push(contract_with_endpoint("/orders").endpoints.remove(0));
+
+        api_storage::save_effective_contract(project_dir.path(), &effective).unwrap();
+        api_storage::save_generated_contract(project_dir.path(), &generated).unwrap();
+
+        let summary = ChangesService::list(&state).await.unwrap();
+        assert_eq!(summary.total_changes, 1);
+        assert_eq!(summary.added.len(), 1);
+        assert!(summary.added[0].path.as_deref().unwrap().contains("/orders"));
+
+        let change_id = summary.added[0].path.clone().unwrap();
+        let result = ChangesService::accept(&state, &change_id).await.unwrap();
         assert_eq!(result.decision, ChangeDecision::Accept);
+
+        // Effective contract should now include /orders too.
+        let updated = api_storage::load_effective_contract(project_dir.path()).unwrap();
+        assert_eq!(updated.endpoints.len(), 2);
+
+        // And the change should no longer show up as pending.
+        let summary = ChangesService::list(&state).await.unwrap();
+        assert_eq!(summary.total_changes, 0);
     }
 
     #[test]

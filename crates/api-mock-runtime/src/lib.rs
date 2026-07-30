@@ -1359,6 +1359,30 @@ pub async fn start_mock_server_with_events(
     Ok(())
 }
 
+/// Start a mock server on an already-bound listener.
+///
+/// Callers that need to know the server is actually accepting connections
+/// before proceeding (rather than racing a `tokio::spawn`'d task that binds
+/// internally) should bind their own `TcpListener` and hand it here - the
+/// port is already in the OS's LISTEN state as soon as `bind()` returns, so
+/// there's no window where "start" reports success but the port isn't live.
+pub async fn start_mock_server_with_listener(
+    listener: tokio::net::TcpListener,
+    contract: ApiContract,
+    seed: u64,
+    scenarios: Vec<MockScenario>,
+    stateful: bool,
+    events: EventEmitter,
+) -> anyhow::Result<()> {
+    let state = RuntimeState::new(contract, seed, scenarios, stateful).with_events(events);
+
+    let app = Router::new()
+        .route("/{*path}", any(catch_all))
+        .with_state(state);
+    axum::serve(listener, app).await?;
+    Ok(())
+}
+
 /// Load scenarios from a file
 pub fn load_scenarios(path: &std::path::Path) -> anyhow::Result<Vec<MockScenario>> {
     let content = std::fs::read_to_string(path)?;

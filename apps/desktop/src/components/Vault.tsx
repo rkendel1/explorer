@@ -1,60 +1,108 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { Project, VaultEntry } from '../App';
+import { errorMessage } from '../lib/errors';
+import type { Project } from '../App';
 
 interface VaultProps {
   project: Project;
 }
 
-function Vault({ project }: VaultProps) {
-  const [entries, setEntries] = useState<VaultEntry[]>([]);
+interface VaultEntryMetadata {
+  id: string;
+  name: string;
+  secret_type: string;
+  status: string;
+}
+
+function Vault({ project: _project }: VaultProps) {
+  const [entries, setEntries] = useState<VaultEntryMetadata[]>([]);
   const [vaultLocked, setVaultLocked] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
 
   useEffect(() => {
-    loadVaultEntries();
-  }, [project.path]);
+    checkVaultState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_project.path]);
+
+  const checkVaultState = async () => {
+    try {
+      const state = await invoke<{ state: string }>('vault_state');
+      setVaultLocked(state.state !== 'unlocked');
+      if (state.state === 'unlocked') {
+        loadVaultEntries();
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
 
   const loadVaultEntries = async () => {
+    setError(null);
     try {
-      const result = await invoke<{ ok: VaultEntry[] }>('vault_list', {
-        projectPath: project.path,
-      });
-      if (result.ok) {
-        setEntries(result.ok);
-      }
-    } catch (error) {
-      console.error('Failed to load vault entries:', error);
-      // Mock data for development
-      setEntries([
-        {
-          name: 'fieldflow-staging-token',
-          entryType: 'bearer_token',
-          status: 'available',
-        },
-        {
-          name: 'api-key-development',
-          entryType: 'api_key',
-          status: 'available',
-        },
-      ]);
-      setVaultLocked(false);
+      const result = await invoke<VaultEntryMetadata[]>('vault_list');
+      setEntries(result);
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
   const handleUnlock = async () => {
-    // In a real implementation, this would prompt for passphrase
-    setVaultLocked(false);
-    loadVaultEntries();
+    setIsBusy(true);
+    setError(null);
+    try {
+      await invoke('vault_unlock', { request: { passphrase: null } });
+      setVaultLocked(false);
+      await loadVaultEntries();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const handleLock = async () => {
+    setIsBusy(true);
+    setError(null);
     try {
-      await invoke('vault_lock', { projectPath: project.path });
-    } catch {
-      // Ignore errors in development
+      await invoke('vault_lock');
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setVaultLocked(true);
+      setEntries([]);
+      setIsBusy(false);
     }
-    setVaultLocked(true);
-    setEntries([]);
+  };
+
+  const handleAddCredential = async () => {
+    const name = window.prompt('Credential name (e.g. staging-token):');
+    if (!name) return;
+    const secretType = window.prompt(
+      'Secret type (api_key, bearer_token, basic_auth, oauth_token):',
+      'bearer_token'
+    );
+    if (!secretType) return;
+    const value = window.prompt('Secret value:');
+    if (!value) return;
+
+    setError(null);
+    try {
+      await invoke('vault_create', { request: { name, secretType, value } });
+      await loadVaultEntries();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    setError(null);
+    try {
+      await invoke('vault_delete', { request: { name } });
+      await loadVaultEntries();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
   };
 
   return (
@@ -64,17 +112,24 @@ function Vault({ project }: VaultProps) {
         Securely store and manage API credentials
       </p>
 
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
       <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.5rem' }}>
         {vaultLocked ? (
-          <button className="control-button primary" onClick={handleUnlock}>
+          <button className="control-button primary" onClick={handleUnlock} disabled={isBusy}>
             Unlock Vault
           </button>
         ) : (
           <>
-            <button className="control-button" onClick={handleLock}>
+            <button className="control-button" onClick={handleLock} disabled={isBusy}>
               Lock Vault
             </button>
-            <button className="control-button primary">
+            <button className="control-button primary" onClick={handleAddCredential}>
               Add Credential
             </button>
           </>
@@ -91,22 +146,21 @@ function Vault({ project }: VaultProps) {
       ) : (
         <div className="vault-list">
           {entries.map((entry) => (
-            <div key={entry.name} className="vault-item">
+            <div key={entry.id} className="vault-item">
               <div className="vault-item-info">
                 <span className="vault-item-name">{entry.name}</span>
-                <span className="vault-item-type">
-                  {entry.entryType === 'bearer_token' ? '******' : 'API Key'}
-                </span>
+                <span className="vault-item-type">{entry.secret_type}</span>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                 <span className={`vault-status ${entry.status}`}>
-                  {entry.status === 'available' ? 'Available' : 'Locked'}
+                  {entry.status === 'available' ? 'Available' : entry.status}
                 </span>
-                <button className="control-button" style={{ fontSize: '0.75rem' }}>
-                  Edit
-                </button>
-                <button className="control-button" style={{ fontSize: '0.75rem' }}>
-                  Reveal
+                <button
+                  className="control-button"
+                  style={{ fontSize: '0.75rem' }}
+                  onClick={() => handleDelete(entry.name)}
+                >
+                  Delete
                 </button>
               </div>
             </div>

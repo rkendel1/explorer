@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { errorMessage } from './lib/errors';
 import ProjectPicker from './components/ProjectPicker';
 import Sidebar from './components/Sidebar';
 import Explorer from './components/Explorer';
@@ -63,43 +64,49 @@ type NavigationItem =
   | 'changes'
   | 'settings';
 
+interface ProjectSummary {
+  name: string;
+  path: string;
+  endpoint_count: number;
+  schema_count: number;
+  environment_count: number;
+  has_contract: boolean;
+}
+
 function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [activeNav, setActiveNav] = useState<NavigationItem>('projects');
+  const [openError, setOpenError] = useState<string | null>(null);
+  const [isOpening, setIsOpening] = useState(false);
 
   const handleOpenProject = async (path: string) => {
+    setIsOpening(true);
+    setOpenError(null);
     try {
-      const result = await invoke<{ ok: Project }>('project_open', { path });
-      if (result.ok) {
-        setCurrentProject({ ...result.ok, path });
-        setActiveNav('workflows');
-      }
-    } catch (error) {
-      console.error('Failed to open project:', error);
-      // For demo/development, create a mock project
+      const result = await invoke<ProjectSummary>('project_open', {
+        request: { path },
+      });
       setCurrentProject({
-        name: path.split('/').pop() || 'Project',
-        path,
-        endpointCount: 42,
-        schemaCount: 18,
-        environmentCount: 3,
+        name: result.name,
+        path: result.path,
+        endpointCount: result.endpoint_count,
+        schemaCount: result.schema_count,
+        environmentCount: result.environment_count,
       });
       setActiveNav('workflows');
+    } catch (error) {
+      setOpenError(errorMessage(error));
+    } finally {
+      setIsOpening(false);
     }
   };
 
-  const handleOpenDemoProject = () => {
-    setCurrentProject({
-      name: 'FieldFlow API',
-      path: '/demo/fieldflow',
-      endpointCount: 42,
-      schemaCount: 18,
-      environmentCount: 3,
-    });
-    setActiveNav('workflows');
-  };
-
-  const handleCloseProject = () => {
+  const handleCloseProject = async () => {
+    try {
+      await invoke('project_close');
+    } catch (error) {
+      console.error('Failed to close project cleanly:', errorMessage(error));
+    }
     setCurrentProject(null);
     setActiveNav('projects');
   };
@@ -109,7 +116,8 @@ function App() {
       return (
         <ProjectPicker
           onOpenProject={handleOpenProject}
-          onOpenDemoProject={handleOpenDemoProject}
+          isOpening={isOpening}
+          error={openError}
         />
       );
     }

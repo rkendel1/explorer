@@ -1,18 +1,20 @@
 //! Runtime service for mock server control.
 //!
 //! This service handles:
-//! - Mock runtime lifecycle (start/stop/restart)
+//! - Mock runtime lifecycle (start/stop/restart) - actually spawns/aborts a
+//!   real `api_mock_runtime` server rather than flipping a status flag
 //! - Runtime state management
-//! - Runtime event streaming
+//! - Runtime event streaming (buffered, not yet pushed live to the frontend)
 //! - Runtime metrics
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
-use api_runtime_events::RuntimeEvent;
+use api_runtime_events::{EventEmitter, RuntimeEvent};
 use serde::{Deserialize, Serialize};
 
 use crate::RuntimeStatus;
-use crate::state::DesktopStateManager;
+use crate::state::{DesktopStateManager, RunningMockServer};
 
 use super::{CustomerJourneyService, ServiceError, ServiceResult};
 
@@ -68,7 +70,12 @@ pub struct RuntimeEventInfo {
     pub details: Option<String>,
 }
 
-/// Runtime state export/import
+/// Runtime state export/import.
+///
+/// `resources` is best-effort: the running mock server doesn't currently
+/// expose a hook into its live in-memory resource state (that would need a
+/// change to `api-mock-runtime` itself), so exports only include scenario
+/// configuration and recent events, not live CRUD resource data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeStateSnapshot {
     pub scenarios: Vec<serde_json::Value>,
@@ -83,15 +90,7 @@ impl RuntimeService {
     /// Get runtime status
     pub async fn get_status(state: &Arc<DesktopStateManager>) -> ServiceResult<RuntimeStatusInfo> {
         let runtime = state.runtime.read().await;
-
-        let metrics = RuntimeMetricsInfo {
-            total_requests: runtime.requests,
-            successful_requests: runtime.requests.saturating_sub(runtime.validation_failures),
-            failed_requests: runtime.validation_failures,
-            validation_failures: runtime.validation_failures,
-            scenario_matches: 0,
-            average_duration_ms: 0.0,
-        };
+        let metrics = Self::compute_metrics(state).await;
 
         let port = runtime
             .address
@@ -108,32 +107,96 @@ impl RuntimeService {
         })
     }
 
-    /// Start the mock runtime
+    /// Start the mock runtime. Actually binds `config.port` and spawns a
+    /// real `api_mock_runtime` server backed by the project's contract.
     pub async fn start(
         state: &Arc<DesktopStateManager>,
         config: RuntimeConfig,
     ) -> ServiceResult<RuntimeStatusInfo> {
-        let project = state.project.read().await;
-
-        if project.is_none() {
-            return Err(ServiceError::no_project());
+        {
+            let project = state.project.read().await;
+            if project.is_none() {
+                return Err(ServiceError::no_project());
+            }
         }
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        // Set to starting state
+        // Stop any previously running server first so restarts don't leak tasks/ports.
+        Self::stop_internal(state).await;
+
         state.set_runtime_state(RuntimeStatus::Starting, None).await;
 
-        // In production, this would:
-        // 1. Load the contract
-        // 2. Start the mock runtime server
-        // 3. Wait for port binding confirmation
+        let bind_addr: SocketAddr = format!("127.0.0.1:{}", config.port)
+            .parse()
+            .map_err(|e| ServiceError::runtime_failed(&format!("invalid port: {e}")))?;
 
-        let address = format!("http://localhost:{}", config.port);
+        // Bind synchronously here (not inside the spawned task) so a port
+        // conflict surfaces as a real error immediately, and so there's no
+        // window where "Running" is reported before the port is actually live.
+        let listener = match tokio::net::TcpListener::bind(bind_addr).await {
+            Ok(listener) => listener,
+            Err(e) => {
+                state.set_runtime_state(RuntimeStatus::Error, None).await;
+                return Err(ServiceError::runtime_failed(&format!(
+                    "port {} unavailable: {e}",
+                    config.port
+                )));
+            }
+        };
 
-        // Simulate successful start
+        let contract = super::contract_service::ensure_contract(&root)
+            .await
+            .map_err(|e| {
+                ServiceError::runtime_failed(&format!("failed to compile contract: {e}"))
+            })?;
+
+        let scenarios = Self::load_scenarios(&root);
+
+        let runtime_id = format!("runtime_{}", uuid::Uuid::new_v4().simple());
+        let emitter = EventEmitter::new(runtime_id, 1000);
+        let mut subscription = emitter.subscribe();
+
+        // Fixed seed for deterministic mock data, matching the CLI's default.
+        let seed = 42u64;
+        let server_task = {
+            let emitter = emitter.clone();
+            tokio::spawn(async move {
+                let _ = api_mock_runtime::start_mock_server_with_listener(
+                    listener, contract, seed, scenarios, true, emitter,
+                )
+                .await;
+            })
+        };
+
+        let pump_state = state.clone();
+        let event_pump_task = tokio::spawn(async move {
+            while let Some(event) = subscription.recv().await {
+                pump_state.push_runtime_event(event.clone()).await;
+                let mut runtime = pump_state.runtime.write().await;
+                match &event {
+                    RuntimeEvent::RequestReceived(_) => runtime.requests += 1,
+                    RuntimeEvent::ValidationFailed(_) => runtime.validation_failures += 1,
+                    _ => {}
+                }
+            }
+        });
+
+        *state.runtime_server.write().await = Some(RunningMockServer {
+            server_task,
+            event_pump_task,
+        });
+
+        let address = format!("http://{bind_addr}");
         state
             .set_runtime_state(RuntimeStatus::Running, Some(address))
             .await;
         state.update_runtime_metrics(0, 0).await;
+
         let _ = CustomerJourneyService::complete_outcome(
             state,
             api_customer_journey::JourneyOutcome::MockReady,
@@ -143,23 +206,25 @@ impl RuntimeService {
         Self::get_status(state).await
     }
 
-    /// Stop the mock runtime
+    /// Stop the mock runtime, aborting the real server task if one is running.
     pub async fn stop(state: &Arc<DesktopStateManager>) -> ServiceResult<RuntimeStatusInfo> {
-        let current = state.runtime.read().await;
+        Self::stop_internal(state).await;
+        Self::get_status(state).await
+    }
 
-        if current.status == RuntimeStatus::Stopped {
-            return Self::get_status(state).await;
+    async fn stop_internal(state: &Arc<DesktopStateManager>) {
+        let current = state.runtime.read().await.status;
+        if current == RuntimeStatus::Stopped {
+            return;
         }
-        drop(current);
 
-        // Set to stopping state
         state.set_runtime_state(RuntimeStatus::Stopping, None).await;
 
-        // In production, this would gracefully stop the runtime
+        if let Some(server) = state.runtime_server.write().await.take() {
+            server.abort().await;
+        }
 
         state.set_runtime_state(RuntimeStatus::Stopped, None).await;
-
-        Self::get_status(state).await
     }
 
     /// Restart the mock runtime
@@ -171,93 +236,159 @@ impl RuntimeService {
         Self::start(state, config).await
     }
 
-    /// Reset runtime state (clear mock data)
+    /// Reset runtime state (clear mock data). Since the running server keeps
+    /// its resource state in-process with no external reset hook, this
+    /// restarts the server - a fresh `RuntimeState` is exactly "all mock
+    /// data cleared" - rather than pretending to clear it in place.
     pub async fn reset_state(state: &Arc<DesktopStateManager>) -> ServiceResult<RuntimeStatusInfo> {
-        let project = state.project.read().await;
-
-        if project.is_none() {
-            return Err(ServiceError::no_project());
+        {
+            let project = state.project.read().await;
+            if project.is_none() {
+                return Err(ServiceError::no_project());
+            }
         }
 
-        // Reset metrics
-        state.update_runtime_metrics(0, 0).await;
+        let was_running = state.runtime.read().await.status == RuntimeStatus::Running;
+        let port = state
+            .runtime
+            .read()
+            .await
+            .address
+            .as_ref()
+            .and_then(|a| a.rsplit(':').next())
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(4010);
 
-        // In production, this would:
-        // 1. Clear stateful mock data
-        // 2. Reset scenario match counts
-        // 3. Clear request history
-
-        Self::get_status(state).await
+        if was_running {
+            Self::restart(state, RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            })
+            .await
+        } else {
+            state.update_runtime_metrics(0, 0).await;
+            state.runtime_events.write().await.clear();
+            Self::get_status(state).await
+        }
     }
 
-    /// Export runtime state
+    /// Export runtime state. See `RuntimeStateSnapshot` docs for the
+    /// `resources` limitation.
     pub async fn export_state(
         state: &Arc<DesktopStateManager>,
     ) -> ServiceResult<RuntimeStateSnapshot> {
-        let project = state.project.read().await;
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        if project.is_none() {
-            return Err(ServiceError::no_project());
-        }
+        let scenarios = Self::load_scenarios(&root)
+            .into_iter()
+            .filter_map(|s| serde_json::to_value(s).ok())
+            .collect();
 
-        // In production, this would export actual state
         Ok(RuntimeStateSnapshot {
-            scenarios: Vec::new(),
-            resources: serde_json::json!({}),
+            scenarios,
+            resources: serde_json::json!({
+                "unavailable": "live resource state introspection is not implemented yet"
+            }),
             timestamp: chrono::Utc::now(),
         })
     }
 
-    /// Import runtime state
+    /// Import runtime state. Not implemented - returns a clear error rather
+    /// than silently accepting a snapshot it can't apply.
     pub async fn import_state(
         state: &Arc<DesktopStateManager>,
         _snapshot: RuntimeStateSnapshot,
     ) -> ServiceResult<()> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
 
-        // In production, this would import the state
-        Ok(())
+        Err(ServiceError::validation(
+            "Importing runtime state isn't supported yet",
+        ))
     }
 
-    /// Get recent runtime events
+    /// Get recent runtime events (most recent first)
     pub async fn get_events(
         state: &Arc<DesktopStateManager>,
-        _limit: usize,
+        limit: usize,
     ) -> ServiceResult<Vec<RuntimeEventInfo>> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
 
-        // In production, this would return actual events
-        Ok(Vec::new())
+        let events = state.runtime_events.read().await;
+        Ok(events.iter().take(limit).map(Self::event_to_info).collect())
     }
 
     /// Get runtime metrics
     pub async fn get_metrics(
         state: &Arc<DesktopStateManager>,
     ) -> ServiceResult<RuntimeMetricsInfo> {
-        let runtime = state.runtime.read().await;
+        Ok(Self::compute_metrics(state).await)
+    }
 
-        Ok(RuntimeMetricsInfo {
+    /// Check if a port is available for binding
+    pub async fn check_port_available(port: u16) -> ServiceResult<bool> {
+        let addr: SocketAddr = format!("127.0.0.1:{port}")
+            .parse()
+            .map_err(|e| ServiceError::validation(format!("invalid port: {e}")))?;
+        Ok(tokio::net::TcpListener::bind(addr).await.is_ok())
+    }
+
+    async fn compute_metrics(state: &Arc<DesktopStateManager>) -> RuntimeMetricsInfo {
+        let runtime = state.runtime.read().await;
+        let events = state.runtime_events.read().await;
+
+        let scenario_matches = events
+            .iter()
+            .filter(|e| matches!(e, RuntimeEvent::ScenarioMatched(_)))
+            .count() as u64;
+
+        let durations: Vec<u64> = events
+            .iter()
+            .filter_map(|e| match e {
+                RuntimeEvent::ResponseSent(e) => Some(e.duration_ms),
+                _ => None,
+            })
+            .collect();
+        let average_duration_ms = if durations.is_empty() {
+            0.0
+        } else {
+            durations.iter().sum::<u64>() as f64 / durations.len() as f64
+        };
+
+        RuntimeMetricsInfo {
             total_requests: runtime.requests,
             successful_requests: runtime.requests.saturating_sub(runtime.validation_failures),
             failed_requests: runtime.validation_failures,
             validation_failures: runtime.validation_failures,
-            scenario_matches: 0,
-            average_duration_ms: 42.0, // Placeholder
-        })
+            scenario_matches,
+            average_duration_ms,
+        }
     }
 
-    /// Check if runtime port is available
-    pub async fn check_port_available(_port: u16) -> ServiceResult<bool> {
-        // In production, this would check actual port availability
-        Ok(true)
+    /// Load mock scenario files from `.repo-api/scenarios/*.yaml`, if any.
+    fn load_scenarios(root: &std::path::Path) -> Vec<api_mock_runtime::MockScenario> {
+        let dir = root.join(".repo-api/scenarios");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return Vec::new();
+        };
+
+        entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("yaml"))
+            .filter_map(|e| api_mock_runtime::load_scenarios(&e.path()).ok())
+            .flatten()
+            .collect()
     }
 
     /// Convert core runtime event to safe info
@@ -322,6 +453,11 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn free_port() -> u16 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
     #[tokio::test]
     async fn test_runtime_lifecycle() {
         let app_dir = tempdir().unwrap();
@@ -333,16 +469,28 @@ mod tests {
             project_dir.path(),
         ));
 
-        // Start
-        let status = RuntimeService::start(&state, RuntimeConfig::default())
-            .await
-            .unwrap();
+        let status = RuntimeService::start(
+            &state,
+            RuntimeConfig {
+                port: free_port(),
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(status.status, RuntimeStatus::Running);
         assert!(status.address.is_some());
 
-        // Stop
+        // The address should actually be reachable.
+        let addr = status.address.unwrap().replace("http://", "");
+        assert!(tokio::net::TcpStream::connect(&addr).await.is_ok());
+
         let status = RuntimeService::stop(&state).await.unwrap();
         assert_eq!(status.status, RuntimeStatus::Stopped);
+
+        // And the port should be released again.
+        assert!(tokio::net::TcpListener::bind(&addr).await.is_ok());
     }
 
     #[tokio::test]
@@ -352,6 +500,36 @@ mod tests {
 
         let result = RuntimeService::start(&state, RuntimeConfig::default()).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_start_fails_on_port_in_use() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        let port = free_port();
+        let _blocker = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+
+        let result = RuntimeService::start(
+            &state,
+            RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(
+            state.runtime.read().await.status,
+            RuntimeStatus::Error
+        );
     }
 
     #[tokio::test]
@@ -368,7 +546,7 @@ mod tests {
         // Add some metrics
         state.update_runtime_metrics(100, 5).await;
 
-        // Reset
+        // Reset (runtime isn't running, so this just clears counters)
         RuntimeService::reset_state(&state).await.unwrap();
 
         let runtime = state.runtime.read().await;

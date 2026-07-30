@@ -236,10 +236,13 @@ name = "api-desktop-app"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "api-analyzers",
  "api-client",
+ "api-compiler",
  "api-core",
  "api-customer-journey",
  "api-desktop",
+ "api-discovery",
  "api-mock-runtime",
  "api-projects",
  "api-runtime-events",

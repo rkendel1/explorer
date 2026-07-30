@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Link to our desktop app library
-api-desktop-app = { path = "../../../crates/api-desktop-app" }
+api-desktop-app = { path = "../../../crates/api-desktop-app", features = ["tauri"] }
 
 [features]
 default = ["custom-protocol"]

@@ -1,36 +1,15 @@
-import { useState } from 'react';
-import type { Project } from '../App';
-
 interface ProjectPickerProps {
   onOpenProject: (path: string) => void;
-  onOpenDemoProject: () => void;
+  isOpening: boolean;
+  error: string | null;
 }
 
-const recentProjects: Project[] = [
-  {
-    name: 'FieldFlow API',
-    path: '/customer/fieldflow',
-  },
-  {
-    name: 'Customer Platform',
-    path: '/customer/platform',
-  },
-];
-
-function ProjectPicker({ onOpenProject, onOpenDemoProject }: ProjectPickerProps) {
-  const [isOpening, setIsOpening] = useState(false);
-
-  const handleOpenRepository = async () => {
-    setIsOpening(true);
-    try {
-      // In a real implementation, this would open a native file dialog
-      // For now, we'll simulate with a prompt or default path
-      const path = window.prompt('Enter repository path:', '/path/to/repository');
-      if (path) {
-        onOpenProject(path);
-      }
-    } finally {
-      setIsOpening(false);
+function ProjectPicker({ onOpenProject, isOpening, error }: ProjectPickerProps) {
+  const handleOpenRepository = () => {
+    // In a real implementation, this would open a native file dialog.
+    const path = window.prompt('Enter repository path:', '/path/to/repository');
+    if (path) {
+      onOpenProject(path);
     }
   };
 
@@ -44,6 +23,12 @@ function ProjectPicker({ onOpenProject, onOpenDemoProject }: ProjectPickerProps)
         Discover APIs in source code • Run safe requests • Start a mock API • Validate with tests
       </p>
 
+      {error && (
+        <div className="error-banner">
+          <span>Couldn't open that repository: {error}</span>
+        </div>
+      )}
+
       <button
         className="action-button"
         onClick={handleOpenRepository}
@@ -51,25 +36,6 @@ function ProjectPicker({ onOpenProject, onOpenDemoProject }: ProjectPickerProps)
       >
         {isOpening ? 'Opening...' : 'Connect Repository'}
       </button>
-      <button className="control-button" onClick={onOpenDemoProject} style={{ marginLeft: '0.75rem' }}>
-        Explore Demo Project
-      </button>
-
-      <div className="recent-projects">
-        <h3>Recent Projects</h3>
-        <div className="project-list">
-          {recentProjects.map((project) => (
-            <div
-              key={project.path}
-              className="project-item"
-              onClick={() => onOpenProject(project.path)}
-            >
-              <span className="name">{project.name}</span>
-              <span className="path">{project.path}</span>
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

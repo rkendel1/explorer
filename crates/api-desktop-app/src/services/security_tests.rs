@@ -11,7 +11,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::VaultEntryMetadata;
-    use crate::services::test_helpers::create_test_project;
+    use crate::services::test_helpers::{create_test_project, seed_mock_environment, spawn_test_server};
     use crate::services::{RequestService, VaultService};
     use crate::state::DesktopStateManager;
     use api_vault::{RedactionService, VaultState};
@@ -97,12 +97,15 @@ mod tests {
         *state.active_root.write().await = Some(project_dir.path().to_path_buf());
         *state.project.write().await = Some(create_test_project(project_dir.path()));
 
+        let base_url = spawn_test_server().await;
+        seed_mock_environment(project_dir.path(), &base_url).await;
+
         let request_service = RequestService::new();
 
         // Execute a request
         let input = crate::services::request_service::ExecuteRequestInput {
             method: "GET".to_string(),
-            url: "http://localhost:4010/users?api_key=secret123".to_string(),
+            url: "{{baseUrl}}/users?api_key=secret123".to_string(),
             headers: None,
             body: None,
             environment_id: None,

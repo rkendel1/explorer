@@ -1,116 +1,112 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { errorMessage } from '../lib/errors';
 import type { Project } from '../App';
 
 interface ChangesProps {
   project: Project;
 }
 
-interface Change {
-  id: string;
-  changeType: 'added' | 'modified' | 'removed';
-  path: string;
+interface ChangeEntry {
+  kind: string;
   description: string;
-  breaking: boolean;
+  path: string | null;
 }
 
-function Changes({ project }: ChangesProps) {
-  const [changes, setChanges] = useState<Change[]>([]);
+interface ContractChangeSummary {
+  total_changes: number;
+  added: ChangeEntry[];
+  modified: ChangeEntry[];
+  removed: ChangeEntry[];
+  potentially_breaking: ChangeEntry[];
+}
+
+function Changes({ project: _project }: ChangesProps) {
+  const [summary, setSummary] = useState<ContractChangeSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadChanges();
-  }, [project.path]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [_project.path]);
 
   const loadChanges = async () => {
+    setIsLoading(true);
+    setError(null);
     try {
-      const result = await invoke<{ ok: Change[] }>('change_list', {
-        projectPath: project.path,
-      });
-      if (result.ok) {
-        setChanges(result.ok);
-      }
-    } catch (error) {
-      console.error('Failed to load changes:', error);
-      // Mock data for development
-      setChanges([
-        {
-          id: '1',
-          changeType: 'added',
-          path: 'POST /customers',
-          description: 'New endpoint for customer creation',
-          breaking: false,
-        },
-        {
-          id: '2',
-          changeType: 'modified',
-          path: 'PATCH /work-orders/{id}',
-          description: 'Added new field: priority',
-          breaking: false,
-        },
-        {
-          id: '3',
-          changeType: 'removed',
-          path: 'Response field: customerName',
-          description: 'Removed deprecated field',
-          breaking: true,
-        },
-      ]);
+      const result = await invoke<ContractChangeSummary>('change_list');
+      setSummary(result);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleAccept = async (changeId: string) => {
+    setError(null);
     try {
-      await invoke('change_accept', { projectPath: project.path, changeId });
-      setChanges(changes.filter((c) => c.id !== changeId));
-    } catch {
-      setChanges(changes.filter((c) => c.id !== changeId));
+      await invoke('change_accept', { request: { changeId } });
+      await loadChanges();
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
   const handleReject = async (changeId: string) => {
+    setError(null);
     try {
-      await invoke('change_reject', { projectPath: project.path, changeId });
-      setChanges(changes.filter((c) => c.id !== changeId));
-    } catch {
-      setChanges(changes.filter((c) => c.id !== changeId));
+      await invoke('change_reject', { request: { changeId, reason: null } });
+      await loadChanges();
+    } catch (err) {
+      setError(errorMessage(err));
     }
   };
 
-  const breakingCount = changes.filter((c) => c.breaking).length;
+  const breakingPaths = new Set((summary?.potentially_breaking ?? []).map((c) => c.path));
+  const allChanges = [
+    ...(summary?.added ?? []),
+    ...(summary?.modified ?? []),
+    ...(summary?.removed ?? []),
+  ];
 
   return (
     <div>
       <h2>Contract Changes</h2>
       <p style={{ color: '#6c757d', marginBottom: '1rem' }}>
-        {changes.length} changes detected
-        {breakingCount > 0 && (
+        {isLoading
+          ? 'Loading...'
+          : `${summary?.total_changes ?? 0} changes detected`}
+        {summary && summary.potentially_breaking.length > 0 && (
           <span style={{ color: '#991b1b', marginLeft: '0.5rem' }}>
-            • {breakingCount} potentially breaking
+            • {summary.potentially_breaking.length} potentially breaking
           </span>
         )}
       </p>
 
-      {changes.length === 0 ? (
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
+      {!isLoading && allChanges.length === 0 ? (
         <div style={{ padding: '2rem', textAlign: 'center', color: '#6c757d' }}>
           No pending changes. Your contract is up to date.
         </div>
       ) : (
         <div className="change-list">
-          {changes.map((change) => (
-            <div key={change.id} className="change-item">
+          {allChanges.map((change) => (
+            <div key={change.path ?? change.description} className="change-item">
               <div className="change-info">
-                <span className={`change-type ${change.changeType}`}>
-                  {change.changeType === 'added'
-                    ? 'Added'
-                    : change.changeType === 'modified'
-                    ? 'Modified'
-                    : 'Removed'}
-                </span>
+                <span className={`change-type ${change.kind}`}>{change.kind}</span>
                 <div>
-                  <div style={{ fontWeight: 500 }}>{change.path}</div>
+                  <div style={{ fontWeight: 500 }}>{change.path ?? change.description}</div>
                   <div style={{ fontSize: '0.875rem', color: '#6c757d' }}>
                     {change.description}
-                    {change.breaking && (
+                    {change.path && breakingPaths.has(change.path) && (
                       <span style={{ color: '#991b1b', marginLeft: '0.5rem' }}>
                         ⚠ Breaking
                       </span>
@@ -118,20 +114,16 @@ function Changes({ project }: ChangesProps) {
                   </div>
                 </div>
               </div>
-              <div className="change-actions">
-                <button
-                  className="control-button"
-                  onClick={() => handleAccept(change.id)}
-                >
-                  Accept
-                </button>
-                <button
-                  className="control-button danger"
-                  onClick={() => handleReject(change.id)}
-                >
-                  Reject
-                </button>
-              </div>
+              {change.path && (
+                <div className="change-actions">
+                  <button className="control-button" onClick={() => handleAccept(change.path!)}>
+                    Accept
+                  </button>
+                  <button className="control-button danger" onClick={() => handleReject(change.path!)}>
+                    Reject
+                  </button>
+                </div>
+              )}
             </div>
           ))}
         </div>

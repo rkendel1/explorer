@@ -13,10 +13,11 @@
 //! - Secrets are redacted from history
 //! - Secrets are redacted from events
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use std::time::Instant;
 
+use api_core::HttpMethod;
 use api_vault::RedactionService;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,21 @@ use crate::state::{DesktopStateManager, RequestHistoryEntry};
 
 use super::vault_service::{AuthenticationConfig, VaultService};
 use super::{CustomerJourneyService, ServiceError, ServiceResult};
+
+fn parse_method(method: &str) -> ServiceResult<HttpMethod> {
+    match method.to_uppercase().as_str() {
+        "GET" => Ok(HttpMethod::GET),
+        "POST" => Ok(HttpMethod::POST),
+        "PUT" => Ok(HttpMethod::PUT),
+        "PATCH" => Ok(HttpMethod::PATCH),
+        "DELETE" => Ok(HttpMethod::DELETE),
+        "OPTIONS" => Ok(HttpMethod::OPTIONS),
+        "HEAD" => Ok(HttpMethod::HEAD),
+        other => Err(ServiceError::validation(format!(
+            "Unsupported HTTP method '{other}'"
+        ))),
+    }
+}
 
 /// Sensitive field names that should be redacted from request/response
 const SENSITIVE_FIELDS: &[&str] = &[
@@ -69,6 +85,28 @@ pub struct ExecuteRequestOutput {
     pub workflow_step_completed: Option<String>,
 }
 
+/// Saved request summary (safe for frontend - headers/body may still contain
+/// values the user typed, but never vault-resolved secrets since those are
+/// only ever injected at execution time via `authentication`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedRequestInfo {
+    pub name: String,
+    pub method: String,
+    pub url: Option<String>,
+    pub endpoint_id: Option<String>,
+}
+
+impl From<api_storage::SavedRequest> for SavedRequestInfo {
+    fn from(saved: api_storage::SavedRequest) -> Self {
+        Self {
+            name: saved.name,
+            method: saved.method,
+            url: saved.url,
+            endpoint_id: saved.endpoint_id,
+        }
+    }
+}
+
 /// Request history entry (safe for frontend - secrets redacted)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestHistoryItem {
@@ -108,7 +146,34 @@ impl RequestService {
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
-        let project = project.as_ref().unwrap();
+        let project_name = project.as_ref().unwrap().name.clone();
+        drop(project);
+
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let method = parse_method(&input.method)?;
+
+        // Resolve the environment (falls back to the first configured
+        // environment, matching the CLI's `--environment` default behavior).
+        let envs = api_storage::load_environments(&root)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+        let environment = input
+            .environment_id
+            .as_ref()
+            .and_then(|id| envs.iter().find(|e| &e.name == id))
+            .or_else(|| envs.first())
+            .cloned()
+            .unwrap_or(api_core::ApiEnvironment {
+                name: "default".to_string(),
+                variables: BTreeMap::new(),
+            });
+
+        let rendered_url = api_client::render_template(&input.url, &environment.variables);
 
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let start = Instant::now();
@@ -125,25 +190,27 @@ impl RequestService {
         };
 
         // Build headers with authentication
-        let mut headers = input.headers.clone().unwrap_or_default();
+        let mut headers: BTreeMap<String, String> = input
+            .headers
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
         if let Some((name, value)) = &auth_header {
             headers.insert(name.clone(), value.clone());
         }
 
-        // Execute request (in production, this would use api_client)
-        // For now, return mock response
+        let outcome = api_client::execute_url_full(
+            &root,
+            method,
+            &rendered_url,
+            Some(&headers),
+            input.body.clone(),
+        )
+        .await
+        .map_err(|e| ServiceError::request_failed(&e.to_string()))?;
+
         let duration = start.elapsed();
-
-        let response_body = serde_json::json!({
-            "success": true,
-            "message": "Request executed successfully",
-            "request_id": request_id
-        });
-
-        let response_headers = vec![
-            ("Content-Type".to_string(), "application/json".to_string()),
-            ("X-Request-Id".to_string(), Uuid::new_v4().to_string()),
-        ];
 
         let validation = ValidationResult {
             valid: true,
@@ -152,22 +219,20 @@ impl RequestService {
 
         // Redact secrets from response
         let redaction = self.vault_service.redaction_service();
-        let redacted_body = redaction.redact_json(&response_body);
-        let redacted_headers = redaction.redact_headers(&response_headers);
+        let redacted_body = redaction.redact_json(&outcome.body);
+        let redacted_headers = redaction.redact_headers(&outcome.headers);
 
         // Add to history (with redacted URL)
-        let redacted_url = Self::redact_url_secrets(&input.url, redaction);
+        let redacted_url = Self::redact_url_secrets(&rendered_url, redaction);
         let history_entry = RequestHistoryEntry {
             id: request_id.clone(),
             method: input.method.clone(),
             url: redacted_url.clone(),
-            status: 200,
-            duration_ms: duration.as_millis() as u64 + 50,
+            status: outcome.status,
+            duration_ms: duration.as_millis() as u64,
             timestamp: Utc::now(),
         };
-        state
-            .add_request_history(&project.name, history_entry)
-            .await;
+        state.add_request_history(&project_name, history_entry).await;
 
         let _ = CustomerJourneyService::complete_outcome(
             state,
@@ -189,14 +254,100 @@ impl RequestService {
 
         Ok(ExecuteRequestOutput {
             request_id,
-            status: 200,
-            duration_ms: duration.as_millis() as u64 + 50,
+            status: outcome.status,
+            duration_ms: duration.as_millis() as u64,
             body_size: redacted_body.to_string().len(),
             headers: redacted_headers,
             body: redacted_body,
             validation,
             workflow_step_completed: Some("run-first-request".to_string()),
         })
+    }
+
+    /// Save a request for later reuse (also resolvable by test suites via
+    /// `TestCase.request_id`).
+    pub async fn save_request(
+        &self,
+        state: &Arc<DesktopStateManager>,
+        name: &str,
+        method: &str,
+        url: &str,
+        headers: Option<HashMap<String, String>>,
+        body: Option<serde_json::Value>,
+    ) -> ServiceResult<SavedRequestInfo> {
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let saved = api_storage::SavedRequest {
+            name: name.to_string(),
+            method: method.to_string(),
+            url: Some(url.to_string()),
+            endpoint_id: None,
+            headers: headers.map(|h| h.into_iter().collect()),
+            body,
+        };
+        api_storage::save_request(&root, &saved).map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        Ok(SavedRequestInfo::from(saved))
+    }
+
+    /// List saved requests for the current project.
+    pub async fn list_saved(
+        &self,
+        state: &Arc<DesktopStateManager>,
+    ) -> ServiceResult<Vec<SavedRequestInfo>> {
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let saved = api_storage::list_saved_requests(&root)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+        Ok(saved.into_iter().map(SavedRequestInfo::from).collect())
+    }
+
+    /// Resolve a saved request by name and execute it - this is how
+    /// `TestCase.request_id` gets turned into an actual HTTP call.
+    pub async fn execute_saved(
+        &self,
+        state: &Arc<DesktopStateManager>,
+        name: &str,
+        environment_id: Option<String>,
+    ) -> ServiceResult<ExecuteRequestOutput> {
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let saved = api_storage::load_saved_request(&root, name)
+            .map_err(|_| ServiceError::not_found(&format!("Saved request '{name}'")))?;
+
+        let Some(url) = saved.url else {
+            return Err(ServiceError::validation(
+                "Saved request has no URL (endpoint-id-based saved requests aren't executable yet)",
+            ));
+        };
+
+        self.execute(
+            state,
+            ExecuteRequestInput {
+                method: saved.method,
+                url,
+                headers: saved.headers.map(|h| h.into_iter().collect()),
+                body: saved.body,
+                environment_id,
+                authentication: None,
+            },
+        )
+        .await
     }
 
     /// Get request history for the current project
@@ -349,7 +500,7 @@ impl Default for RequestService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::test_helpers::create_test_project;
+    use crate::services::test_helpers::{create_test_project, seed_mock_environment, spawn_test_server};
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -384,10 +535,13 @@ mod tests {
         *state.active_root.write().await = Some(project_dir.path().to_path_buf());
         *state.project.write().await = Some(create_test_project(project_dir.path()));
 
+        let base_url = spawn_test_server().await;
+        seed_mock_environment(project_dir.path(), &base_url).await;
+
         let service = RequestService::new();
         let input = ExecuteRequestInput {
             method: "GET".to_string(),
-            url: "http://localhost:4010/users".to_string(),
+            url: "{{baseUrl}}/users".to_string(),
             headers: None,
             body: None,
             environment_id: None,
@@ -467,12 +621,15 @@ mod tests {
         *state.active_root.write().await = Some(project_dir.path().to_path_buf());
         *state.project.write().await = Some(create_test_project(project_dir.path()));
 
+        let base_url = spawn_test_server().await;
+        seed_mock_environment(project_dir.path(), &base_url).await;
+
         let service = RequestService::new();
 
         // Execute request
         let input = ExecuteRequestInput {
             method: "GET".to_string(),
-            url: "http://localhost:4010/users".to_string(),
+            url: "{{baseUrl}}/users".to_string(),
             headers: None,
             body: None,
             environment_id: None,

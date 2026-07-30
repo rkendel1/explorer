@@ -267,21 +267,27 @@ impl ExplorerService {
         })
     }
 
-    /// Trigger contract discovery/re-scan
+    /// Trigger a real contract re-scan (discovery + compile), replacing
+    /// whatever generated/effective contracts already exist.
     pub async fn refresh_contract(state: &Arc<DesktopStateManager>) -> ServiceResult<usize> {
         let project = state.project.read().await;
-
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
+        drop(project);
 
-        let root = state.active_root.read().await;
-        let _root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
 
-        // In production, this would trigger api-discovery
-        // For now, return existing endpoint count
-        let endpoints = Self::list_endpoints(state, None).await?;
-        Ok(endpoints.len())
+        let contract = super::contract_service::scan_and_persist(&root)
+            .await
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        Ok(contract.endpoints.len())
     }
 
     // Helper to extract schema type and property names
