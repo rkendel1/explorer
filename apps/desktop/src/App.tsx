@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { errorMessage } from './lib/errors';
 import ProjectPicker from './components/ProjectPicker';
@@ -73,13 +73,34 @@ interface ProjectSummary {
   has_contract: boolean;
 }
 
+interface RecentProject {
+  path: string;
+  name: string;
+  last_opened: string;
+}
+
 function App() {
   const [currentProject, setCurrentProject] = useState<Project | null>(null);
   const [activeNav, setActiveNav] = useState<NavigationItem>('projects');
   const [openError, setOpenError] = useState<string | null>(null);
   const [isOpening, setIsOpening] = useState(false);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
 
-  const handleOpenProject = async (path: string) => {
+  const loadRecentProjects = async () => {
+    try {
+      const projects = await invoke<RecentProject[]>('project_list');
+      setRecentProjects(projects);
+    } catch {
+      // Keep UI usable even if recent list fails.
+      setRecentProjects([]);
+    }
+  };
+
+  useEffect(() => {
+    void loadRecentProjects();
+  }, []);
+
+  const handleOpenProject = async (path: string, options?: { keepCurrentView?: boolean }) => {
     setIsOpening(true);
     setOpenError(null);
     try {
@@ -93,7 +114,13 @@ function App() {
         schemaCount: result.schema_count,
         environmentCount: result.environment_count,
       });
-      setActiveNav('workflows');
+      await loadRecentProjects();
+
+      if (!options?.keepCurrentView) {
+        setActiveNav('workflows');
+      } else if (activeNav === 'projects') {
+        setActiveNav('workflows');
+      }
     } catch (error) {
       setOpenError(errorMessage(error));
     } finally {
@@ -109,6 +136,14 @@ function App() {
     }
     setCurrentProject(null);
     setActiveNav('projects');
+    await loadRecentProjects();
+  };
+
+  const handleContextSwitch = async (path: string) => {
+    if (!path || currentProject?.path === path) {
+      return;
+    }
+    await handleOpenProject(path, { keepCurrentView: true });
   };
 
   const renderContent = () => {
@@ -158,13 +193,50 @@ function App() {
     <div className="app-container">
       <header className="app-header">
         <h1>Repo API</h1>
-        {currentProject && (
-          <div className="status-badge">
-            <span className="status-dot running"></span>
-            Running
-          </div>
-        )}
+        <div className="header-context-controls">
+          <button
+            className="control-button"
+            onClick={() => setActiveNav('projects')}
+            disabled={activeNav === 'projects'}
+          >
+            Projects
+          </button>
+
+          <select
+            className="method-select"
+            value={currentProject?.path ?? ''}
+            onChange={(event) => void handleContextSwitch(event.target.value)}
+            disabled={isOpening || recentProjects.length === 0}
+            style={{ minWidth: '320px' }}
+          >
+            {!currentProject && <option value="">Select project context...</option>}
+            {recentProjects.map((project) => (
+              <option key={project.path} value={project.path}>
+                {project.name} - {project.path}
+              </option>
+            ))}
+          </select>
+
+          {currentProject && (
+            <div className="status-badge">
+              <span className="status-dot running"></span>
+              Context Active
+            </div>
+          )}
+        </div>
       </header>
+
+      {currentProject && (
+        <div className="project-context-strip">
+          <div className="project-context-title">Project Context: {currentProject.name}</div>
+          <div className="project-context-path">{currentProject.path}</div>
+          <div className="project-context-metrics">
+            <span>{currentProject.endpointCount ?? 0} endpoints</span>
+            <span>{currentProject.schemaCount ?? 0} schemas</span>
+            <span>{currentProject.environmentCount ?? 0} environments</span>
+          </div>
+        </div>
+      )}
 
       <div className="app-body">
         {currentProject && (

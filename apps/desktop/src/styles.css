@@ -51,6 +51,45 @@ body {
   font-weight: 600;
 }
 
+.header-context-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.project-context-strip {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 1rem;
+  background: #eef2ff;
+  border-bottom: 1px solid #dbe4ff;
+}
+
+.project-context-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e3a8a;
+}
+
+.project-context-path {
+  font-size: 0.82rem;
+  color: #334155;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
+}
+
+.project-context-metrics {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
 .status-badge {
   display: flex;
   align-items: center;
@@ -112,6 +151,22 @@ body {
   padding: 1.5rem;
   overflow: auto;
   background: #ffffff;
+}
+
+@media (max-width: 860px) {
+  .app-header {
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .header-context-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .project-context-strip {
+    align-items: flex-start;
+  }
 }
 
 .main-content h2 {

@@ -689,6 +689,16 @@
 			"problemMatcher": [
 				"$rustc"
 			]
+		},
+		{
+			"label": "validate-project-context-switcher",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": []
 		}
 	]
 }
