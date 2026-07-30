@@ -26,10 +26,32 @@ interface EnvPreviewReport {
   skipped: string[];
 }
 
+interface EnvEditablePreviewEntry {
+  source_file: string;
+  env_key: string;
+  vault_entry_name: string;
+  secret_type: string;
+  value: string;
+}
+
+interface EnvEditablePreviewReport {
+  entries: EnvEditablePreviewEntry[];
+  skipped: string[];
+}
+
+interface EnvFileCandidate {
+  path: string;
+  relative_path: string;
+}
+
 function Vault({ project: _project }: VaultProps) {
   const [entries, setEntries] = useState<VaultEntryMetadata[]>([]);
   const [vaultLocked, setVaultLocked] = useState(true);
   const [envPath, setEnvPath] = useState('.env');
+  const [envCandidates, setEnvCandidates] = useState<EnvFileCandidate[]>([]);
+  const [selectedEnvFiles, setSelectedEnvFiles] = useState<Record<string, boolean>>({});
+  const [editablePreviewEntries, setEditablePreviewEntries] = useState<EnvEditablePreviewEntry[]>([]);
+  const [selectedPreviewRows, setSelectedPreviewRows] = useState<Record<string, boolean>>({});
   const [includeAllEnvVars, setIncludeAllEnvVars] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<EnvPreviewReport | null>(null);
@@ -45,6 +67,7 @@ function Vault({ project: _project }: VaultProps) {
     try {
       const state = await invoke<{ state: string }>('vault_state');
       setVaultLocked(state.state !== 'unlocked');
+      await loadEnvCandidates();
       if (state.state === 'unlocked') {
         loadVaultEntries();
       }
@@ -60,6 +83,125 @@ function Vault({ project: _project }: VaultProps) {
       setEntries(result);
     } catch (err) {
       setError(errorMessage(err));
+    }
+  };
+
+  const loadEnvCandidates = async () => {
+    try {
+      const files = await invoke<EnvFileCandidate[]>('vault_env_files');
+      setEnvCandidates(files);
+
+      const fileSelection: Record<string, boolean> = {};
+      files.forEach((file) => {
+        fileSelection[file.relative_path] = false;
+      });
+
+      if (files.length > 0) {
+        const preferred =
+          files.find((file) => file.relative_path === '.env') ??
+          files.find((file) => file.relative_path.endsWith('/.env')) ??
+          files.find((file) => file.relative_path.includes('.env.local')) ??
+          files[0];
+
+        fileSelection[preferred.relative_path] = true;
+        setSelectedEnvFiles(fileSelection);
+
+        setEnvPath((current) => {
+          const trimmed = current.trim();
+          if (!trimmed || trimmed === '.env') {
+            return preferred.relative_path;
+          }
+          return current;
+        });
+      }
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  const selectedFilePaths = () =>
+    Object.entries(selectedEnvFiles)
+      .filter(([, selected]) => selected)
+      .map(([path]) => path);
+
+  const previewRowId = (entry: EnvEditablePreviewEntry) =>
+    `${entry.source_file}:${entry.env_key}:${entry.vault_entry_name}`;
+
+  const handlePreviewSelectedFiles = async () => {
+    const paths = selectedFilePaths();
+    if (paths.length === 0) {
+      setError('Select at least one env file location.');
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const report = await invoke<EnvEditablePreviewReport>('vault_preview_env_files', {
+        request: { paths, includeAll: includeAllEnvVars },
+      });
+
+      setEditablePreviewEntries(report.entries);
+      const rowSelection: Record<string, boolean> = {};
+      report.entries.forEach((entry) => {
+        rowSelection[previewRowId(entry)] = true;
+      });
+      setSelectedPreviewRows(rowSelection);
+      setPreview(null);
+
+      setNotice(
+        `Loaded ${report.entries.length} variable(s) from ${paths.length} env file location(s).`
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+      setEditablePreviewEntries([]);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const updateEditableEntry = (
+    rowId: string,
+    patch: Partial<EnvEditablePreviewEntry>
+  ) => {
+    setEditablePreviewEntries((current) =>
+      current.map((entry) =>
+        previewRowId(entry) === rowId ? { ...entry, ...patch } : entry
+      )
+    );
+  };
+
+  const handleImportSelectedPreviewRows = async () => {
+    const rows = editablePreviewEntries.filter((entry) => selectedPreviewRows[previewRowId(entry)]);
+    if (rows.length === 0) {
+      setError('Select at least one variable row to import.');
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      for (const entry of rows) {
+        const name = entry.vault_entry_name.trim();
+        if (!name) {
+          throw new Error(`Vault entry name cannot be empty for ${entry.env_key}`);
+        }
+        await invoke('vault_create', {
+          request: {
+            name,
+            secretType: entry.secret_type,
+            value: entry.value,
+          },
+        });
+      }
+      await loadVaultEntries();
+      setNotice(`Imported ${rows.length} variable(s) from selected rows.`);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
     }
   };
 
@@ -214,6 +356,163 @@ function Vault({ project: _project }: VaultProps) {
           <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
             Load project variables into Vault entries. Known auth variables are typed automatically.
           </p>
+          {envCandidates.length > 0 && (
+            <div style={{ marginBottom: '0.5rem' }}>
+              <p style={{ color: '#6c757d', marginBottom: '0.4rem' }}>Discovered env file locations:</p>
+              <div style={{ display: 'grid', gap: '0.3rem', maxHeight: '180px', overflow: 'auto', border: '1px solid #e9ecef', borderRadius: '8px', padding: '0.5rem' }}>
+                {envCandidates.map((candidate) => (
+                  <label key={candidate.path} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedEnvFiles[candidate.relative_path] ?? false}
+                      onChange={(event) =>
+                        setSelectedEnvFiles((prev) => ({
+                          ...prev,
+                          [candidate.relative_path]: event.target.checked,
+                        }))
+                      }
+                    />
+                    <span style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                      {candidate.relative_path}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <button className="control-button" onClick={handlePreviewSelectedFiles} disabled={isBusy}>
+                  Preview Selected Files
+                </button>
+                <button
+                  className="control-button"
+                  onClick={() => {
+                    const all: Record<string, boolean> = {};
+                    envCandidates.forEach((candidate) => {
+                      all[candidate.relative_path] = true;
+                    });
+                    setSelectedEnvFiles(all);
+                  }}
+                  disabled={isBusy}
+                >
+                  Select All
+                </button>
+                <button
+                  className="control-button"
+                  onClick={() => {
+                    const none: Record<string, boolean> = {};
+                    envCandidates.forEach((candidate) => {
+                      none[candidate.relative_path] = false;
+                    });
+                    setSelectedEnvFiles(none);
+                  }}
+                  disabled={isBusy}
+                >
+                  Clear Selection
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: '0.5rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              className="url-input"
+              style={{ maxWidth: '420px' }}
+              value={envPath}
+              onChange={(event) => setEnvPath(event.target.value)}
+              placeholder=".env, .env.local, services/api/.env.example"
+            />
+            <button className="control-button" onClick={handlePreviewEnv} disabled={isBusy}>
+              Preview Single File
+            </button>
+            <button className="control-button" onClick={handleImportEnv} disabled={isBusy}>
+              Import Single File
+            </button>
+            <button className="control-button" onClick={loadEnvCandidates} disabled={isBusy}>
+              Re-scan Env Files
+            </button>
+          </div>
+
+          {editablePreviewEntries.length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+                Select rows to import. You can manually edit vault name, secret type, and value before importing.
+              </p>
+              <div style={{ display: 'grid', gap: '0.4rem' }}>
+                {editablePreviewEntries.map((entry) => {
+                  const rowId = previewRowId(entry);
+                  return (
+                    <div
+                      key={rowId}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '28px 1.2fr 1fr 1fr 1fr',
+                        gap: '0.45rem',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedPreviewRows[rowId] ?? false}
+                        onChange={(event) =>
+                          setSelectedPreviewRows((prev) => ({
+                            ...prev,
+                            [rowId]: event.target.checked,
+                          }))
+                        }
+                      />
+                      <input className="url-input" value={entry.source_file} readOnly />
+                      <input
+                        className="url-input"
+                        value={entry.vault_entry_name}
+                        onChange={(event) =>
+                          updateEditableEntry(rowId, { vault_entry_name: event.target.value })
+                        }
+                        title={entry.env_key}
+                      />
+                      <input
+                        className="url-input"
+                        value={entry.secret_type}
+                        onChange={(event) =>
+                          updateEditableEntry(rowId, { secret_type: event.target.value })
+                        }
+                      />
+                      <input
+                        className="url-input"
+                        value={entry.value}
+                        onChange={(event) =>
+                          updateEditableEntry(rowId, { value: event.target.value })
+                        }
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: '0.6rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button className="control-button" onClick={handleImportSelectedPreviewRows} disabled={isBusy}>
+                  Import Selected Rows
+                </button>
+                <button
+                  className="control-button"
+                  onClick={() => {
+                    const allRows: Record<string, boolean> = {};
+                    editablePreviewEntries.forEach((entry) => {
+                      allRows[previewRowId(entry)] = true;
+                    });
+                    setSelectedPreviewRows(allRows);
+                  }}
+                  disabled={isBusy}
+                >
+                  Select All Rows
+                </button>
+                <button
+                  className="control-button"
+                  onClick={() => setSelectedPreviewRows({})}
+                  disabled={isBusy}
+                >
+                  Clear Row Selection
+                </button>
+              </div>
+            </div>
+          )}
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
             <input
               type="checkbox"
@@ -222,21 +521,6 @@ function Vault({ project: _project }: VaultProps) {
             />
             Import all variables (not just auth)
           </label>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              className="url-input"
-              style={{ maxWidth: '420px' }}
-              value={envPath}
-              onChange={(event) => setEnvPath(event.target.value)}
-              placeholder=".env or config/.env.local"
-            />
-            <button className="control-button" onClick={handlePreviewEnv} disabled={isBusy}>
-              Preview Import
-            </button>
-            <button className="control-button" onClick={handleImportEnv} disabled={isBusy}>
-              Import Variables
-            </button>
-          </div>
 
           {preview && (
             <div style={{ marginTop: '0.75rem' }}>

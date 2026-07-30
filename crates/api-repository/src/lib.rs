@@ -40,18 +40,32 @@ fn detect_language(path: &Path) -> DetectedLanguage {
     }
 }
 
-fn is_spec_file(path: &Path) -> bool {
+fn is_spec_candidate(path: &Path) -> bool {
     matches!(
-        path.file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default(),
-        "openapi.yaml"
-            | "openapi.yml"
-            | "openapi.json"
-            | "swagger.yaml"
-            | "swagger.yml"
-            | "swagger.json"
+        path.extension().and_then(|e| e.to_str()).unwrap_or_default(),
+        "yaml" | "yml" | "json"
     )
+}
+
+fn looks_like_openapi_spec(path: &Path) -> bool {
+    let file_name = path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or_default()
+        .to_lowercase();
+    if file_name.contains("openapi") || file_name.contains("swagger") {
+        return true;
+    }
+
+    let Ok(content) = fs::read_to_string(path) else {
+        return false;
+    };
+
+    // Keep this heuristic cheap and resilient across JSON/YAML formatting.
+    content.contains("openapi:")
+        || content.contains("\"openapi\"")
+        || content.contains("swagger:")
+        || content.contains("\"swagger\"")
 }
 
 pub fn create_snapshot(root: &Path) -> anyhow::Result<RepositorySnapshot> {
@@ -131,7 +145,7 @@ pub fn inventory(root: &Path) -> anyhow::Result<RepositoryInventory> {
                 language: lang,
             });
         }
-        if is_spec_file(&rel) {
+        if is_spec_candidate(&rel) && looks_like_openapi_spec(&path) {
             specifications.push(SpecificationFile { path: rel.clone() });
             frameworks.insert(format!("{:?}", DetectedFramework::OpenApi));
         }

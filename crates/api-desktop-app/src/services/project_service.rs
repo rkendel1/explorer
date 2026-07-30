@@ -317,8 +317,18 @@ impl ProjectService {
         state: &Arc<DesktopStateManager>,
     ) -> ServiceResult<Vec<RecentProject>> {
         match state.load_recent_projects().await {
-            Ok(projects) => Ok(projects),
-            Err(e) => Err(ServiceError::internal(&e.to_string())),
+            Ok(projects) if !projects.is_empty() => Ok(projects),
+            Ok(_) => Ok(state.recent_projects.read().await.clone()),
+            Err(e) => {
+                // If disk read fails but we already have an in-memory list,
+                // prefer returning that over showing an empty dashboard.
+                let fallback = state.recent_projects.read().await.clone();
+                if fallback.is_empty() {
+                    Err(ServiceError::internal(&e.to_string()))
+                } else {
+                    Ok(fallback)
+                }
+            }
         }
     }
 

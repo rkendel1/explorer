@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::VaultEntryMetadata;
 use crate::services::VaultService;
-use crate::services::vault_service::{EnvImportReport, EnvPreviewReport};
+use crate::services::vault_service::{
+    EnvEditablePreviewReport, EnvFileCandidate, EnvImportReport, EnvPreviewReport,
+};
 
 use super::{AppState, CommandResult, from_service, state_handle};
 
@@ -36,6 +38,14 @@ pub struct UnlockVaultRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ImportVaultEnvRequest {
     pub path: Option<String>,
+    pub include_all: Option<bool>,
+}
+
+/// Preview dotenv values from selected files request
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewVaultEnvFilesRequest {
+    pub paths: Vec<String>,
     pub include_all: Option<bool>,
 }
 
@@ -158,6 +168,27 @@ pub async fn vault_preview_env(
                 request.path.as_deref(),
                 request.include_all.unwrap_or(false),
             )
+            .await,
+    )
+}
+
+/// Discover dotenv files recursively across project folders
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn vault_env_files(state: AppState<'_>) -> CommandResult<Vec<EnvFileCandidate>> {
+    let state = state_handle(&state);
+    from_service(vault_service().discover_env_files(&state).await)
+}
+
+/// Preview dotenv values from selected files for manual import/edit
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn vault_preview_env_files(
+    state: AppState<'_>,
+    request: PreviewVaultEnvFilesRequest,
+) -> CommandResult<EnvEditablePreviewReport> {
+    let state = state_handle(&state);
+    from_service(
+        vault_service()
+            .preview_env_entries_for_paths(&state, &request.paths, request.include_all.unwrap_or(false))
             .await,
     )
 }

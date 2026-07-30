@@ -11,7 +11,7 @@
 //! - Secrets are redacted from all events, logs, and history
 //! - Vault state does not restore as unlocked after restart
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use api_vault::{RedactionService, SecretType, VaultState, VaultStore};
@@ -66,6 +66,27 @@ pub struct EnvPreviewEntry {
     pub env_key: String,
     pub vault_entry_name: String,
     pub secret_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvEditablePreviewEntry {
+    pub source_file: String,
+    pub env_key: String,
+    pub vault_entry_name: String,
+    pub secret_type: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvEditablePreviewReport {
+    pub entries: Vec<EnvEditablePreviewEntry>,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvFileCandidate {
+    pub path: String,
+    pub relative_path: String,
 }
 
 /// Authentication configuration (references vault, no secrets)
@@ -381,6 +402,100 @@ impl VaultService {
         })
     }
 
+    /// Preview dotenv values from multiple files with source path and value.
+    /// Intended for selective import and manual value editing in UI.
+    pub async fn preview_env_entries_for_paths(
+        &self,
+        state: &Arc<DesktopStateManager>,
+        env_paths: &[String],
+        include_all: bool,
+    ) -> ServiceResult<EnvEditablePreviewReport> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+
+        let root = state.active_root.read().await;
+        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+
+        let mut entries = Vec::new();
+        let mut skipped = Vec::new();
+
+        for env_path in env_paths {
+            let path = Self::resolve_env_path(root, Some(env_path.as_str()));
+            let content = Self::read_dotenv_content(&path)?;
+            let source_file = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            for raw_line in content.lines() {
+                let Some((key, value)) = Self::parse_env_line(raw_line) else {
+                    continue;
+                };
+
+                let secret_type = if include_all {
+                    Self::classify_any_secret_type(&key, &value)
+                } else {
+                    let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
+                        skipped.push(format!("{}:{}", source_file, key));
+                        continue;
+                    };
+                    secret_type
+                };
+
+                entries.push(EnvEditablePreviewEntry {
+                    source_file: source_file.clone(),
+                    env_key: key.clone(),
+                    vault_entry_name: Self::to_vault_entry_name(&key),
+                    secret_type: Self::secret_type_label(secret_type).to_string(),
+                    value,
+                });
+            }
+        }
+
+        Ok(EnvEditablePreviewReport { entries, skipped })
+    }
+
+    /// Discover dotenv-style files recursively across the project tree.
+    pub async fn discover_env_files(
+        &self,
+        state: &Arc<DesktopStateManager>,
+    ) -> ServiceResult<Vec<EnvFileCandidate>> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+
+        let root = state.active_root.read().await;
+        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+
+        let mut files = Vec::new();
+        Self::collect_env_files(root, root, &mut files)?;
+        files.sort_by_key(|path| {
+            path.strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string()
+        });
+
+        Ok(files
+            .into_iter()
+            .map(|path| {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                EnvFileCandidate {
+                    path: path.display().to_string(),
+                    relative_path: rel,
+                }
+            })
+            .collect())
+    }
+
     /// Delete a vault entry
     pub async fn delete_entry(
         &self,
@@ -489,8 +604,107 @@ impl VaultService {
                 root.join(candidate)
             }
         } else {
+            if let Ok(candidates) = Self::discover_env_files_for_root(root)
+                && let Some(primary) = candidates.first()
+            {
+                return primary.clone();
+            }
             root.join(".env")
         }
+    }
+
+    fn discover_env_files_for_root(root: &Path) -> ServiceResult<Vec<PathBuf>> {
+        let mut files = Vec::new();
+        Self::collect_env_files(root, root, &mut files)?;
+        files.sort_by_key(|path| {
+            let rel = path
+                .strip_prefix(root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            let priority = if rel == ".env" {
+                0
+            } else if rel.ends_with("/.env") {
+                1
+            } else if rel.contains(".env.local") {
+                2
+            } else if rel.contains(".env.example") || rel.contains(".env.sample") {
+                4
+            } else {
+                3
+            };
+            (priority, rel)
+        });
+        Ok(files)
+    }
+
+    fn collect_env_files(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> ServiceResult<()> {
+        let entries = std::fs::read_dir(dir).map_err(|e| {
+            ServiceError::internal(&format!("Unable to read directory '{}': {e}", dir.display()))
+        })?;
+
+        for entry in entries {
+            let entry = match entry {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                if Self::should_skip_env_scan_dir(dir_name) {
+                    continue;
+                }
+                if let Err(err) = Self::collect_env_files(root, &path, out) {
+                    // Continue scanning siblings if one subtree is inaccessible.
+                    if !err.message.contains("Unable to read directory") {
+                        return Err(err);
+                    }
+                }
+                continue;
+            }
+
+            if file_type.is_file() {
+                let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                if Self::is_env_file_name(file_name) {
+                    out.push(path);
+                }
+            }
+        }
+
+        // Preserve only paths rooted in the project root.
+        out.retain(|path| path.starts_with(root));
+        Ok(())
+    }
+
+    fn should_skip_env_scan_dir(name: &str) -> bool {
+        matches!(
+            name,
+            ".git"
+                | "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | ".next"
+                | ".turbo"
+                | ".yarn"
+                | ".pnpm-store"
+                | ".venv"
+                | "venv"
+                | "__pycache__"
+        )
+    }
+
+    fn is_env_file_name(file_name: &str) -> bool {
+        let lower = file_name.to_lowercase();
+        lower == ".env"
+            || lower.starts_with(".env.")
+            || lower.ends_with(".env")
+            || lower.contains(".env.")
     }
 
     fn read_dotenv_content(path: &Path) -> ServiceResult<String> {
@@ -781,5 +995,41 @@ mod tests {
         assert!(report.imported.iter().any(|n| n == "app-port"));
         assert!(report.imported.iter().any(|n| n == "auth-token"));
         assert!(report.skipped.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_discover_env_files_nested_monorepo() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        std::fs::create_dir_all(project_dir.path().join("apps/web")).unwrap();
+        std::fs::create_dir_all(project_dir.path().join("services/api")).unwrap();
+        std::fs::create_dir_all(project_dir.path().join("node_modules/pkg")).unwrap();
+
+        std::fs::write(project_dir.path().join(".env"), "ROOT=true\n").unwrap();
+        std::fs::write(project_dir.path().join("apps/web/.env.local"), "WEB=true\n").unwrap();
+        std::fs::write(
+            project_dir.path().join("services/api/.env.example"),
+            "API=true\n",
+        )
+        .unwrap();
+        std::fs::write(
+            project_dir.path().join("node_modules/pkg/.env"),
+            "SHOULD_NOT_BE_FOUND=true\n",
+        )
+        .unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(create_test_project(project_dir.path()));
+
+        let service = VaultService::new();
+        let files = service.discover_env_files(&state).await.unwrap();
+        let rels: Vec<String> = files.into_iter().map(|f| f.relative_path).collect();
+
+        assert!(rels.iter().any(|p| p == ".env"));
+        assert!(rels.iter().any(|p| p == "apps/web/.env.local"));
+        assert!(rels.iter().any(|p| p == "services/api/.env.example"));
+        assert!(!rels.iter().any(|p| p.contains("node_modules")));
     }
 }

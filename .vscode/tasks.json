@@ -569,6 +569,66 @@
 			"problemMatcher": [
 				"$rustc"
 			]
+		},
+		{
+			"label": "validate-recent-fallback",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-api-scanning",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo test -p api-analyzers && cargo check -p api-desktop-app"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-env-discovery",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo test -p api-desktop-app test_discover_env_files_nested_monorepo && cargo check -p api-desktop-app && cd apps/desktop && npm run lint"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-env-discovery-2",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo test -p api-desktop-app test_discover_env_files_nested_monorepo && cargo check -p api-desktop-app && cd apps/desktop && npm run lint"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
+		},
+		{
+			"label": "validate-vault-selective-import",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint && npm run build"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
 		}
 	]
 }
