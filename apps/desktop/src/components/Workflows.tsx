@@ -106,7 +106,7 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
     }
   };
 
-  const selectGoal = async (nextGoal: CustomerGoal) => {
+  const selectGoal = async (nextGoal: CustomerGoal): Promise<boolean> => {
     setGoal(nextGoal);
     setError(null);
     setIsBusy(true);
@@ -115,10 +115,42 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
         request: { goal: nextGoal },
       });
       await loadJourneyState();
+      return true;
     } catch (err) {
       setError(errorMessage(err));
+      return false;
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const selectGoalAndContinue = async (nextGoal: CustomerGoal) => {
+    const selected = await selectGoal(nextGoal);
+    if (!selected) {
+      return;
+    }
+
+    if (nextGoal === 'try_endpoint') {
+      onNavigate('requests');
+      return;
+    }
+
+    if (nextGoal === 'create_mock_api') {
+      onNavigate('runtime');
+      return;
+    }
+
+    if (nextGoal === 'test_my_api') {
+      await invoke('test_prepare_onboarding');
+      onNavigate('tests');
+      return;
+    }
+
+    if (nextGoal === 'explore_my_api') {
+      if (!journeyState?.completed_outcomes.includes('api_discovered')) {
+        await completeOutcome('api_discovered');
+      }
+      onNavigate('explorer');
     }
   };
 
@@ -357,10 +389,10 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
       <div className="runtime-card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>What Would You Like To Do?</h3>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button className="control-button" onClick={() => void selectGoal('try_endpoint')} disabled={isBusy}>Try An Endpoint</button>
-          <button className="control-button" onClick={() => void selectGoal('create_mock_api')} disabled={isBusy}>Create A Mock API</button>
-          <button className="control-button" onClick={() => void selectGoal('test_my_api')} disabled={isBusy}>Test My API</button>
-          <button className="control-button" onClick={() => void selectGoal('explore_my_api')} disabled={isBusy}>Explore My API</button>
+          <button className="control-button" onClick={() => void selectGoalAndContinue('try_endpoint')} disabled={isBusy}>Try An Endpoint</button>
+          <button className="control-button" onClick={() => void selectGoalAndContinue('create_mock_api')} disabled={isBusy}>Create A Mock API</button>
+          <button className="control-button" onClick={() => void selectGoalAndContinue('test_my_api')} disabled={isBusy}>Test My API</button>
+          <button className="control-button" onClick={() => void selectGoalAndContinue('explore_my_api')} disabled={isBusy}>Explore My API</button>
         </div>
         {goal && (
           <p style={{ marginTop: '0.75rem', color: '#6c757d' }}>

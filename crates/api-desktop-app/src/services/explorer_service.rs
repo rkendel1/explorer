@@ -145,7 +145,8 @@ impl ExplorerService {
                 name: p.name.clone(),
                 location: format!("{:?}", p.location).to_lowercase(),
                 required: p.required,
-                schema_type: "string".to_string(), // SchemaReference only has id
+                schema_type: p.schema.id.clone(),
+                schema_ref: Some(format!("#/components/schemas/{}", p.schema.id)),
             })
             .collect();
 
@@ -159,6 +160,7 @@ impl ExplorerService {
                     .schema
                     .as_ref()
                     .map(|s| format!("#/components/schemas/{}", s.id)),
+                example: r.example.clone(),
             })
             .collect();
 
@@ -186,6 +188,7 @@ impl ExplorerService {
                     content_type: rb.content_type.clone(),
                     required: rb.required,
                     schema_ref: Some(format!("#/components/schemas/{}", rb.schema.id)),
+                    example: rb.example.clone(),
                 }),
             responses,
             security: endpoint.security.schemes.clone(),

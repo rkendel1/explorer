@@ -128,6 +128,7 @@ pub struct ParameterInfo {
     pub location: String,
     pub required: bool,
     pub schema_type: String,
+    pub schema_ref: Option<String>,
 }
 
 /// Request body information
@@ -136,6 +137,7 @@ pub struct RequestBodyInfo {
     pub content_type: String,
     pub required: bool,
     pub schema_ref: Option<String>,
+    pub example: Option<serde_json::Value>,
 }
 
 /// Response information
@@ -144,6 +146,7 @@ pub struct ResponseInfo {
     pub status: u16,
     pub content_type: Option<String>,
     pub schema_ref: Option<String>,
+    pub example: Option<serde_json::Value>,
 }
 
 /// Evidence information

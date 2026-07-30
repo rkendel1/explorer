@@ -398,6 +398,30 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-workflows-goal-buttons",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-explorer-backend-detail-model",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-explorer-ui-details",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-explorer-ui-details-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
 		}
 	]
 }
