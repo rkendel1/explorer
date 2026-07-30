@@ -45,7 +45,6 @@ function Tests({ project: _project }: TestsProps) {
 
   useEffect(() => {
     loadSuites();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_project.path]);
 
   const loadSuites = async () => {

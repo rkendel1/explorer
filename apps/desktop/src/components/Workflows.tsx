@@ -79,7 +79,6 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
 
   useEffect(() => {
     loadJourneyState();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.path]);
 
   const completeOutcome = async (outcome: JourneyOutcome) => {

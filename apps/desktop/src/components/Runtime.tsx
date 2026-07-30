@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { ChangeEvent } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { errorMessage } from '../lib/errors';
 import type { Project } from '../App';
@@ -26,6 +27,12 @@ interface RuntimeEventInfo {
   details: string | null;
 }
 
+interface RuntimeStateSnapshot {
+  scenarios: unknown[];
+  resources: unknown;
+  timestamp: string;
+}
+
 function Runtime({ project: _project }: RuntimeProps) {
   const [status, setStatus] = useState<RuntimeStatusInfo>({
     status: 'stopped',
@@ -35,6 +42,7 @@ function Runtime({ project: _project }: RuntimeProps) {
   const [events, setEvents] = useState<RuntimeEventInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     loadRuntimeStatus();
@@ -122,6 +130,93 @@ function Runtime({ project: _project }: RuntimeProps) {
     }
   };
 
+  const normalizeImportedState = (parsed: unknown): RuntimeStateSnapshot => {
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error('Invalid state file: expected a JSON object');
+    }
+
+    const raw = parsed as {
+      scenarios?: unknown;
+      resources?: unknown;
+      counters?: unknown;
+      timestamp?: unknown;
+    };
+
+    // Accept desktop-exported snapshots and CLI/runtime raw payloads.
+    if ('scenarios' in raw && 'resources' in raw) {
+      return {
+        scenarios: Array.isArray(raw.scenarios) ? raw.scenarios : [],
+        resources: raw.resources,
+        timestamp:
+          typeof raw.timestamp === 'string' ? raw.timestamp : new Date().toISOString(),
+      };
+    }
+
+    return {
+      scenarios: [],
+      resources: {
+        resources: (raw as { resources?: unknown }).resources ?? {},
+        counters: (raw as { counters?: unknown }).counters ?? {},
+      },
+      timestamp: new Date().toISOString(),
+    };
+  };
+
+  const handleExportState = async () => {
+    setIsBusy(true);
+    setError(null);
+    try {
+      const snapshot = await invoke<RuntimeStateSnapshot>('runtime_export_state');
+      const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const fileName = `runtime-state-${new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')}.json`;
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handleImportSelectedFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as unknown;
+      const snapshot = normalizeImportedState(parsed);
+
+      await invoke('runtime_import_state', {
+        request: {
+          state: snapshot,
+        },
+      });
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      event.target.value = '';
+      setIsBusy(false);
+    }
+  };
+
+  const handleImportState = () => {
+    importInputRef.current?.click();
+  };
+
   const running = status.status === 'running';
 
   return (
@@ -187,6 +282,21 @@ function Runtime({ project: _project }: RuntimeProps) {
             <button className="control-button" onClick={handleReset} disabled={isBusy}>
               Reset State
             </button>
+            <button className="control-button" onClick={handleExportState} disabled={!running || isBusy}>
+              Export State
+            </button>
+            <button className="control-button" onClick={handleImportState} disabled={!running || isBusy}>
+              Import State
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json,.json"
+              style={{ display: 'none' }}
+              onChange={(event) => {
+                void handleImportSelectedFile(event);
+              }}
+            />
           </div>
         </div>
 

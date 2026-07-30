@@ -25,7 +25,6 @@ function Explorer({ project }: ExplorerProps) {
 
   useEffect(() => {
     loadEndpoints();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.path]);
 
   const loadEndpoints = async () => {

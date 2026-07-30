@@ -28,7 +28,6 @@ function Changes({ project: _project }: ChangesProps) {
 
   useEffect(() => {
     loadChanges();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_project.path]);
 
   const loadChanges = async () => {
