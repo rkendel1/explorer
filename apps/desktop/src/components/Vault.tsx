@@ -14,11 +14,24 @@ interface VaultEntryMetadata {
   status: string;
 }
 
+interface EnvPreviewEntry {
+  env_key: string;
+  vault_entry_name: string;
+  secret_type: string;
+}
+
+interface EnvPreviewReport {
+  file_path: string;
+  will_import: EnvPreviewEntry[];
+  skipped: string[];
+}
+
 function Vault({ project: _project }: VaultProps) {
   const [entries, setEntries] = useState<VaultEntryMetadata[]>([]);
   const [vaultLocked, setVaultLocked] = useState(true);
   const [envPath, setEnvPath] = useState('.env');
   const [notice, setNotice] = useState<string | null>(null);
+  const [preview, setPreview] = useState<EnvPreviewReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -128,8 +141,29 @@ function Vault({ project: _project }: VaultProps) {
             ? ` Skipped ${report.skipped.length} non-auth variable(s).`
             : '')
       );
+      setPreview(null);
     } catch (err) {
       setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const handlePreviewEnv = async () => {
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const report = await invoke<EnvPreviewReport>('vault_preview_env', {
+        request: { path: envPath.trim() || null },
+      });
+      setPreview(report);
+      setNotice(
+        `Preview loaded from ${report.file_path}: ${report.will_import.length} import candidate(s).`
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+      setPreview(null);
     } finally {
       setIsBusy(false);
     }
@@ -187,10 +221,37 @@ function Vault({ project: _project }: VaultProps) {
               onChange={(event) => setEnvPath(event.target.value)}
               placeholder=".env or config/.env.local"
             />
+            <button className="control-button" onClick={handlePreviewEnv} disabled={isBusy}>
+              Preview Import
+            </button>
             <button className="control-button" onClick={handleImportEnv} disabled={isBusy}>
               Import Auth Secrets
             </button>
           </div>
+
+          {preview && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+                Will import {preview.will_import.length} variable(s):
+              </p>
+              {preview.will_import.length === 0 ? (
+                <p style={{ color: '#6c757d' }}>No auth variables detected.</p>
+              ) : (
+                <div style={{ display: 'grid', gap: '0.4rem' }}>
+                  {preview.will_import.map((item) => (
+                    <div key={`${item.env_key}:${item.vault_entry_name}`} style={{ fontSize: '0.85rem' }}>
+                      <strong>{item.env_key}</strong> maps to {item.vault_entry_name} ({item.secret_type})
+                    </div>
+                  ))}
+                </div>
+              )}
+              {preview.skipped.length > 0 && (
+                <p style={{ color: '#6c757d', marginTop: '0.5rem' }}>
+                  Skipped non-auth vars: {preview.skipped.join(', ')}
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -107,6 +107,7 @@ fn main() {
             vault_lock,
             vault_state,
             vault_import_env,
+            vault_preview_env,
             workflow_list,
             workflow_get,
             workflow_start,

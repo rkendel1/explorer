@@ -53,6 +53,21 @@ pub struct EnvImportReport {
     pub skipped: Vec<String>,
 }
 
+/// Preview of dotenv auth values that would be imported.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvPreviewReport {
+    pub file_path: String,
+    pub will_import: Vec<EnvPreviewEntry>,
+    pub skipped: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvPreviewEntry {
+    pub env_key: String,
+    pub vault_entry_name: String,
+    pub secret_type: String,
+}
+
 /// Authentication configuration (references vault, no secrets)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationConfig {
@@ -278,12 +293,7 @@ impl VaultService {
             root.join(".env")
         };
 
-        let content = std::fs::read_to_string(&path).map_err(|e| {
-            ServiceError::internal(&format!(
-                "Unable to read dotenv file '{}': {e}",
-                path.display()
-            ))
-        })?;
+        let content = Self::read_dotenv_content(&path)?;
 
         let store = VaultStore::open(root).map_err(|e| ServiceError::internal(&e.to_string()))?;
 
@@ -312,6 +322,49 @@ impl VaultService {
         Ok(EnvImportReport {
             file_path: path.display().to_string(),
             imported,
+            skipped,
+        })
+    }
+
+    /// Preview authentication-related dotenv values that would be imported.
+    pub async fn preview_env_auth_entries(
+        &self,
+        state: &Arc<DesktopStateManager>,
+        env_path: Option<&str>,
+    ) -> ServiceResult<EnvPreviewReport> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+
+        let root = state.active_root.read().await;
+        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+        let path = Self::resolve_env_path(root, env_path);
+        let content = Self::read_dotenv_content(&path)?;
+
+        let mut will_import = Vec::new();
+        let mut skipped = Vec::new();
+
+        for raw_line in content.lines() {
+            let Some((key, value)) = Self::parse_env_line(raw_line) else {
+                continue;
+            };
+
+            let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
+                skipped.push(key);
+                continue;
+            };
+
+            will_import.push(EnvPreviewEntry {
+                env_key: key.clone(),
+                vault_entry_name: Self::to_vault_entry_name(&key),
+                secret_type: Self::secret_type_label(secret_type).to_string(),
+            });
+        }
+
+        Ok(EnvPreviewReport {
+            file_path: path.display().to_string(),
+            will_import,
             skipped,
         })
     }
@@ -415,6 +468,28 @@ impl VaultService {
         Ok(entries.len())
     }
 
+    fn resolve_env_path(root: &Path, env_path: Option<&str>) -> std::path::PathBuf {
+        if let Some(custom) = env_path {
+            let candidate = std::path::PathBuf::from(custom);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                root.join(candidate)
+            }
+        } else {
+            root.join(".env")
+        }
+    }
+
+    fn read_dotenv_content(path: &Path) -> ServiceResult<String> {
+        std::fs::read_to_string(path).map_err(|e| {
+            ServiceError::internal(&format!(
+                "Unable to read dotenv file '{}': {e}",
+                path.display()
+            ))
+        })
+    }
+
     fn parse_env_line(line: &str) -> Option<(String, String)> {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -466,6 +541,18 @@ impl VaultService {
             return Some(SecretType::BearerToken);
         }
         None
+    }
+
+    fn secret_type_label(secret_type: SecretType) -> &'static str {
+        match secret_type {
+            SecretType::ApiKey => "api_key",
+            SecretType::BearerToken => "bearer_token",
+            SecretType::BasicAuth => "basic_auth",
+            SecretType::OAuthToken => "oauth_token",
+            SecretType::DatabaseCredential => "database_credential",
+            SecretType::Certificate => "certificate",
+            SecretType::Custom => "custom",
+        }
     }
 
     fn to_vault_entry_name(key: &str) -> String {
@@ -612,5 +699,30 @@ mod tests {
         assert!(report.imported.iter().any(|n| n == "api-key"));
         assert!(report.imported.iter().any(|n| n == "auth-token"));
         assert!(report.skipped.iter().any(|n| n == "INTERNAL_FLAG"));
+    }
+
+    #[tokio::test]
+    async fn test_preview_env_auth_entries() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        std::fs::write(
+            project_dir.path().join(".env"),
+            "API_KEY=abc123\nFEATURE=true\nBEARER_TOKEN=my-token\n",
+        )
+        .unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(create_test_project(project_dir.path()));
+
+        let service = VaultService::new();
+        let preview = service
+            .preview_env_auth_entries(&state, None)
+            .await
+            .unwrap();
+
+        assert!(preview.will_import.iter().any(|e| e.vault_entry_name == "api-key"));
+        assert!(preview.skipped.iter().any(|n| n == "FEATURE"));
     }
 }

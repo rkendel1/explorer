@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::VaultEntryMetadata;
 use crate::services::VaultService;
-use crate::services::vault_service::EnvImportReport;
+use crate::services::vault_service::{EnvImportReport, EnvPreviewReport};
 
 use super::{AppState, CommandResult, from_service, state_handle};
 
@@ -135,6 +135,20 @@ pub async fn vault_import_env(
     from_service(
         vault_service()
             .import_env_auth_entries(&state, request.path.as_deref())
+            .await,
+    )
+}
+
+/// Preview auth-focused dotenv values that would be imported
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn vault_preview_env(
+    state: AppState<'_>,
+    request: ImportVaultEnvRequest,
+) -> CommandResult<EnvPreviewReport> {
+    let state = state_handle(&state);
+    from_service(
+        vault_service()
+            .preview_env_auth_entries(&state, request.path.as_deref())
             .await,
     )
 }

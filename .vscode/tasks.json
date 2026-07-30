@@ -452,6 +452,48 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_import_env_auth_entries",
 			"problemMatcher": []
+		},
+		{
+			"label": "check-vault-preview-feature",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-vault-preview-feature",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_preview_env_auth_entries vault_service::tests::test_import_env_auth_entries",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-vault-preview-ui",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-vault-preview-feature-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-vault-preview-single",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_preview_env_auth_entries",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-vault-import-single",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_import_env_auth_entries",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-vault-preview-ui-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
 		}
 	]
 }
