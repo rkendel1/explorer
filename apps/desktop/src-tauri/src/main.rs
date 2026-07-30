@@ -69,6 +69,7 @@ fn main() {
             environment_update,
             environment_create,
             environment_delete,
+            environment_variables,
             journey_get,
             journey_state,
             journey_select_goal,

@@ -112,6 +112,16 @@ function App() {
   };
 
   const renderContent = () => {
+    if (activeNav === 'projects') {
+      return (
+        <ProjectPicker
+          onOpenProject={handleOpenProject}
+          isOpening={isOpening}
+          error={openError}
+        />
+      );
+    }
+
     if (!currentProject) {
       return (
         <ProjectPicker

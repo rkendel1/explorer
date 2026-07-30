@@ -524,6 +524,39 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-projects-dashboard-nav",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-requests-builder",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cd apps/desktop && npm run lint && npm run build"
+			]
+		},
+		{
+			"label": "validate-requests-builder-2",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cd apps/desktop && npm run lint && npm run build"
+			]
+		},
+		{
+			"label": "validate-requests-builder-3",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cd apps/desktop && npm run lint && npm run build"
+			]
 		}
 	]
 }

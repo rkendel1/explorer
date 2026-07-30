@@ -18,6 +18,7 @@ interface SidebarProps {
 }
 
 const navItems: { id: NavigationItem; label: string }[] = [
+  { id: 'projects', label: 'Projects Dashboard' },
   { id: 'workflows', label: 'Getting Started' },
   { id: 'explorer', label: 'Your API' },
   { id: 'requests', label: 'Requests' },

@@ -3,7 +3,7 @@
 use serde::Deserialize;
 
 use crate::services::EnvironmentService;
-use crate::services::environment_service::EnvironmentConfig;
+use crate::services::environment_service::{EnvironmentConfig, EnvironmentVariableInfo};
 
 use super::{AppState, CommandError, CommandResult, from_service, state_handle};
 
@@ -34,6 +34,13 @@ pub struct CreateEnvironmentRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DeleteEnvironmentRequest {
     pub id: String,
+}
+
+/// Get environment variables request
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetEnvironmentVariablesRequest {
+    pub id: Option<String>,
 }
 
 /// List all environments
@@ -98,4 +105,15 @@ pub async fn environment_delete(
 ) -> CommandResult<bool> {
     let state = state_handle(&state);
     from_service(EnvironmentService::delete(&state, &request.id).await)
+}
+
+/// List variables for selected/active environment
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn environment_variables(
+    state: AppState<'_>,
+    request: Option<GetEnvironmentVariablesRequest>,
+) -> CommandResult<Vec<EnvironmentVariableInfo>> {
+    let state = state_handle(&state);
+    let id = request.and_then(|r| r.id);
+    from_service(EnvironmentService::list_variables(&state, id.as_deref()).await)
 }

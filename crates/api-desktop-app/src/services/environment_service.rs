@@ -66,6 +66,13 @@ pub struct ResolvedVariables {
     pub vault_refs: Vec<String>,
 }
 
+/// Environment variable information for UI helpers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentVariableInfo {
+    pub key: String,
+    pub value: String,
+}
+
 /// Environment service implementation
 pub struct EnvironmentService;
 
@@ -233,6 +240,56 @@ impl EnvironmentService {
             resolved,
             vault_refs,
         })
+    }
+
+    /// List concrete variables for a selected environment.
+    ///
+    /// Selection order:
+    /// 1) explicit `environment_id`
+    /// 2) currently active environment in desktop state
+    /// 3) first configured environment
+    pub async fn list_variables(
+        state: &Arc<DesktopStateManager>,
+        environment_id: Option<&str>,
+    ) -> ServiceResult<Vec<EnvironmentVariableInfo>> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+        drop(project);
+
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let environments =
+            api_storage::load_environments(&root).map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        let active = state.active_environment.read().await.clone();
+        let selected = environment_id
+            .and_then(|id| environments.iter().find(|e| e.name == id))
+            .or_else(|| {
+                active
+                    .as_ref()
+                    .and_then(|id| environments.iter().find(|e| &e.name == id))
+            })
+            .or_else(|| environments.first());
+
+        let Some(env) = selected else {
+            return Ok(Vec::new());
+        };
+
+        Ok(env
+            .variables
+            .iter()
+            .map(|(key, value)| EnvironmentVariableInfo {
+                key: key.clone(),
+                value: value.clone(),
+            })
+            .collect())
     }
 
     /// Link a vault credential to an environment
