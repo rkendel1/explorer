@@ -36,6 +36,7 @@ pub struct UnlockVaultRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ImportVaultEnvRequest {
     pub path: Option<String>,
+    pub include_all: Option<bool>,
 }
 
 /// Vault state response
@@ -134,7 +135,11 @@ pub async fn vault_import_env(
     let state = state_handle(&state);
     from_service(
         vault_service()
-            .import_env_auth_entries(&state, request.path.as_deref())
+            .import_env_auth_entries(
+                &state,
+                request.path.as_deref(),
+                request.include_all.unwrap_or(false),
+            )
             .await,
     )
 }
@@ -148,7 +153,11 @@ pub async fn vault_preview_env(
     let state = state_handle(&state);
     from_service(
         vault_service()
-            .preview_env_auth_entries(&state, request.path.as_deref())
+            .preview_env_auth_entries(
+                &state,
+                request.path.as_deref(),
+                request.include_all.unwrap_or(false),
+            )
             .await,
     )
 }

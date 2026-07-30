@@ -30,6 +30,7 @@ function Vault({ project: _project }: VaultProps) {
   const [entries, setEntries] = useState<VaultEntryMetadata[]>([]);
   const [vaultLocked, setVaultLocked] = useState(true);
   const [envPath, setEnvPath] = useState('.env');
+  const [includeAllEnvVars, setIncludeAllEnvVars] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<EnvPreviewReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,15 +131,15 @@ function Vault({ project: _project }: VaultProps) {
         imported: string[];
         skipped: string[];
       }>('vault_import_env', {
-        request: { path: envPath.trim() || null },
+        request: { path: envPath.trim() || null, includeAll: includeAllEnvVars },
       });
 
       await loadVaultEntries();
 
       setNotice(
-        `Imported ${report.imported.length} auth secret(s) from ${report.file_path}.` +
+        `Imported ${report.imported.length} variable(s) from ${report.file_path}.` +
           (report.skipped.length > 0
-            ? ` Skipped ${report.skipped.length} non-auth variable(s).`
+            ? ` Skipped ${report.skipped.length} variable(s).`
             : '')
       );
       setPreview(null);
@@ -155,7 +156,7 @@ function Vault({ project: _project }: VaultProps) {
     setNotice(null);
     try {
       const report = await invoke<EnvPreviewReport>('vault_preview_env', {
-        request: { path: envPath.trim() || null },
+        request: { path: envPath.trim() || null, includeAll: includeAllEnvVars },
       });
       setPreview(report);
       setNotice(
@@ -211,8 +212,16 @@ function Vault({ project: _project }: VaultProps) {
         <div className="runtime-card" style={{ marginBottom: '1rem' }}>
           <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Import From .env</h3>
           <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
-            Loads auth-style variables (API keys/tokens) into Vault entries.
+            Load project variables into Vault entries. Known auth variables are typed automatically.
           </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+            <input
+              type="checkbox"
+              checked={includeAllEnvVars}
+              onChange={(event) => setIncludeAllEnvVars(event.target.checked)}
+            />
+            Import all variables (not just auth)
+          </label>
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <input
               className="url-input"
@@ -225,7 +234,7 @@ function Vault({ project: _project }: VaultProps) {
               Preview Import
             </button>
             <button className="control-button" onClick={handleImportEnv} disabled={isBusy}>
-              Import Auth Secrets
+              Import Variables
             </button>
           </div>
 
@@ -247,7 +256,7 @@ function Vault({ project: _project }: VaultProps) {
               )}
               {preview.skipped.length > 0 && (
                 <p style={{ color: '#6c757d', marginTop: '0.5rem' }}>
-                  Skipped non-auth vars: {preview.skipped.join(', ')}
+                  Skipped vars: {preview.skipped.join(', ')}
                 </p>
               )}
             </div>

@@ -268,6 +268,7 @@ impl VaultService {
         &self,
         state: &Arc<DesktopStateManager>,
         env_path: Option<&str>,
+        include_all: bool,
     ) -> ServiceResult<EnvImportReport> {
         let project = state.project.read().await;
         if project.is_none() {
@@ -305,9 +306,14 @@ impl VaultService {
                 continue;
             };
 
-            let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
-                skipped.push(key);
-                continue;
+            let secret_type = if include_all {
+                Self::classify_any_secret_type(&key, &value)
+            } else {
+                let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
+                    skipped.push(key);
+                    continue;
+                };
+                secret_type
             };
 
             let entry_name = Self::to_vault_entry_name(&key);
@@ -331,6 +337,7 @@ impl VaultService {
         &self,
         state: &Arc<DesktopStateManager>,
         env_path: Option<&str>,
+        include_all: bool,
     ) -> ServiceResult<EnvPreviewReport> {
         let project = state.project.read().await;
         if project.is_none() {
@@ -350,9 +357,14 @@ impl VaultService {
                 continue;
             };
 
-            let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
-                skipped.push(key);
-                continue;
+            let secret_type = if include_all {
+                Self::classify_any_secret_type(&key, &value)
+            } else {
+                let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
+                    skipped.push(key);
+                    continue;
+                };
+                secret_type
             };
 
             will_import.push(EnvPreviewEntry {
@@ -543,6 +555,22 @@ impl VaultService {
         None
     }
 
+    fn classify_any_secret_type(key: &str, value: &str) -> SecretType {
+        if let Some(auth_type) = Self::classify_auth_secret_type(key, value) {
+            return auth_type;
+        }
+
+        let upper = key.to_uppercase();
+        if upper.contains("PASSWORD") || upper.contains("POSTGRES") || upper.contains("DATABASE") {
+            return SecretType::DatabaseCredential;
+        }
+        if upper.contains("CERT") || upper.contains("PEM") || upper.contains("TLS") {
+            return SecretType::Certificate;
+        }
+
+        SecretType::Custom
+    }
+
     fn secret_type_label(secret_type: SecretType) -> &'static str {
         match secret_type {
             SecretType::ApiKey => "api_key",
@@ -692,7 +720,7 @@ mod tests {
         service.unlock(&state, None).await.unwrap();
 
         let report = service
-            .import_env_auth_entries(&state, None)
+            .import_env_auth_entries(&state, None, false)
             .await
             .unwrap();
 
@@ -718,11 +746,40 @@ mod tests {
 
         let service = VaultService::new();
         let preview = service
-            .preview_env_auth_entries(&state, None)
+            .preview_env_auth_entries(&state, None, false)
             .await
             .unwrap();
 
         assert!(preview.will_import.iter().any(|e| e.vault_entry_name == "api-key"));
         assert!(preview.skipped.iter().any(|n| n == "FEATURE"));
+    }
+
+    #[tokio::test]
+    async fn test_import_env_include_all_variables() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        std::fs::write(
+            project_dir.path().join(".env"),
+            "NODE_ENV=development\nAPP_PORT=8000\nAUTH_TOKEN=token-xyz\n",
+        )
+        .unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(create_test_project(project_dir.path()));
+
+        let service = VaultService::new();
+        service.unlock(&state, None).await.unwrap();
+
+        let report = service
+            .import_env_auth_entries(&state, None, true)
+            .await
+            .unwrap();
+
+        assert!(report.imported.iter().any(|n| n == "node-env"));
+        assert!(report.imported.iter().any(|n| n == "app-port"));
+        assert!(report.imported.iter().any(|n| n == "auth-token"));
+        assert!(report.skipped.is_empty());
     }
 }
