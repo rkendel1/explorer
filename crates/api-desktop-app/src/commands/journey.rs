@@ -38,11 +38,27 @@ pub struct JourneyProgressResponse {
 fn parse_goal(value: &str) -> Option<CustomerGoal> {
     match value {
         "understand_my_api" => Some(CustomerGoal::UnderstandMyApi),
+        "try_endpoint" => Some(CustomerGoal::TryMyApi),
         "try_my_api" => Some(CustomerGoal::TryMyApi),
         "create_mock_api" => Some(CustomerGoal::CreateMockApi),
         "test_my_api" => Some(CustomerGoal::TestMyApi),
+        "explore_my_api" => Some(CustomerGoal::ExploreEverything),
         "explore_everything" => Some(CustomerGoal::ExploreEverything),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_goal_accepts_ui_aliases() {
+        assert_eq!(parse_goal("try_endpoint"), Some(CustomerGoal::TryMyApi));
+        assert_eq!(
+            parse_goal("explore_my_api"),
+            Some(CustomerGoal::ExploreEverything)
+        );
     }
 }
 

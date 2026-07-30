@@ -45,6 +45,8 @@ pub struct RuntimeState {
     pub address: Option<String>,
     pub requests: u64,
     pub validation_failures: u64,
+    #[serde(skip)]
+    pub managed_by_desktop: bool,
 }
 
 /// Runtime status

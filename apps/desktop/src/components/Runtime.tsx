@@ -11,6 +11,7 @@ interface RuntimeProps {
 interface RuntimeStatusInfo {
   status: 'stopped' | 'starting' | 'running' | 'stopping' | 'error';
   address: string | null;
+  managed_by_desktop: boolean;
   metrics: {
     total_requests: number;
     validation_failures: number;
@@ -37,15 +38,25 @@ function Runtime({ project: _project }: RuntimeProps) {
   const [status, setStatus] = useState<RuntimeStatusInfo>({
     status: 'stopped',
     address: null,
+    managed_by_desktop: false,
     metrics: { total_requests: 0, validation_failures: 0 },
   });
   const [events, setEvents] = useState<RuntimeEventInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    loadRuntimeStatus();
+    void loadRuntimeStatus();
+
+    const interval = window.setInterval(() => {
+      void loadRuntimeStatus();
+    }, 3000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [_project.path]);
 
@@ -75,11 +86,13 @@ function Runtime({ project: _project }: RuntimeProps) {
   const handleStart = async () => {
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await invoke<RuntimeStatusInfo>('runtime_start', {
         request: { port: 4010, profileId: null },
       });
       setStatus(result);
+      setNotice('Mock runtime is running.');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -90,10 +103,12 @@ function Runtime({ project: _project }: RuntimeProps) {
   const handleStop = async () => {
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await invoke<RuntimeStatusInfo>('runtime_stop');
       setStatus(result);
       setEvents([]);
+      setNotice('Mock runtime stopped.');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -104,11 +119,13 @@ function Runtime({ project: _project }: RuntimeProps) {
   const handleRestart = async () => {
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await invoke<RuntimeStatusInfo>('runtime_restart', {
         request: { port: 4010, profileId: null },
       });
       setStatus(result);
+      setNotice('Mock runtime restarted.');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -119,10 +136,12 @@ function Runtime({ project: _project }: RuntimeProps) {
   const handleReset = async () => {
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const result = await invoke<RuntimeStatusInfo>('runtime_reset');
       setStatus(result);
       setEvents([]);
+      setNotice('Mock runtime state reset.');
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -165,6 +184,7 @@ function Runtime({ project: _project }: RuntimeProps) {
   const handleExportState = async () => {
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const snapshot = await invoke<RuntimeStateSnapshot>('runtime_export_state');
       const blob = new Blob([JSON.stringify(snapshot, null, 2)], {
@@ -180,6 +200,7 @@ function Runtime({ project: _project }: RuntimeProps) {
       link.download = fileName;
       link.click();
       URL.revokeObjectURL(url);
+      setNotice(`State exported to ${fileName}.`);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -195,6 +216,7 @@ function Runtime({ project: _project }: RuntimeProps) {
 
     setIsBusy(true);
     setError(null);
+    setNotice(null);
     try {
       const text = await file.text();
       const parsed = JSON.parse(text) as unknown;
@@ -205,6 +227,7 @@ function Runtime({ project: _project }: RuntimeProps) {
           state: snapshot,
         },
       });
+      setNotice(`Imported state from ${file.name}.`);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -218,6 +241,7 @@ function Runtime({ project: _project }: RuntimeProps) {
   };
 
   const running = status.status === 'running';
+  const externallyManaged = running && !status.managed_by_desktop;
 
   return (
     <div>
@@ -227,6 +251,19 @@ function Runtime({ project: _project }: RuntimeProps) {
         <div className="error-banner">
           <span>{error}</span>
           <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="success-banner">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)}>&times;</button>
+        </div>
+      )}
+
+      {externallyManaged && (
+        <div className="runtime-hint-banner">
+          Runtime is managed by an external process. Stop from your platform/dev script, not this panel.
         </div>
       )}
 
@@ -268,7 +305,7 @@ function Runtime({ project: _project }: RuntimeProps) {
 
           <div className="runtime-controls">
             {running ? (
-              <button className="control-button danger" onClick={handleStop} disabled={isBusy}>
+              <button className="control-button danger" onClick={handleStop} disabled={isBusy || externallyManaged}>
                 Stop
               </button>
             ) : (
@@ -298,6 +335,10 @@ function Runtime({ project: _project }: RuntimeProps) {
               }}
             />
           </div>
+
+          <p className="step-description" style={{ marginTop: '0.75rem' }}>
+            Import expects a runtime state JSON file exported from this screen (or CLI state export), not a .env file.
+          </p>
         </div>
 
         <div>

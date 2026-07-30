@@ -247,6 +247,22 @@ impl DesktopStateManager {
         let mut runtime = self.runtime.write().await;
         runtime.status = status;
         runtime.address = address;
+        if status != RuntimeStatus::Running {
+            runtime.managed_by_desktop = false;
+        }
+    }
+
+    /// Set runtime state with explicit ownership metadata.
+    pub async fn set_runtime_state_with_ownership(
+        &self,
+        status: RuntimeStatus,
+        address: Option<String>,
+        managed_by_desktop: bool,
+    ) {
+        let mut runtime = self.runtime.write().await;
+        runtime.status = status;
+        runtime.address = address;
+        runtime.managed_by_desktop = managed_by_desktop;
     }
 
     /// Update runtime metrics

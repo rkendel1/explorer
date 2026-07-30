@@ -710,3 +710,26 @@ body {
   cursor: pointer;
   line-height: 1;
 }
+
+.success-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 0.5rem;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+  font-size: 0.875rem;
+}
+
+.success-banner button {
+  background: none;
+  border: none;
+  color: #065f46;
+  font-size: 1rem;
+  cursor: pointer;
+  line-height: 1;
+}

@@ -188,6 +188,174 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "check-port-4010-listener",
+			"type": "shell",
+			"command": "lsof -n -P -iTCP:4010 -sTCP:LISTEN || true",
+			"problemMatcher": []
+		},
+		{
+			"label": "kill-port-4010-pid-27103",
+			"type": "shell",
+			"command": "kill 27103",
+			"problemMatcher": []
+		},
+		{
+			"label": "verify-port-4010-free",
+			"type": "shell",
+			"command": "lsof -n -P -iTCP:4010 -sTCP:LISTEN || true",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance runtime_service::tests::test_start_fails_on_port_in_use",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-desktop-runtime-fix",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-adopt",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-portinuse",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_fails_on_port_in_use",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-adopt-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-portinuse-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_fails_on_port_in_use",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-start-cases",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-api-desktop-app",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-runtime-crates",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-mock-runtime -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-controls",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance runtime_service::tests::test_stop_adopted_runtime_instance runtime_service::tests::test_start_fails_on_port_in_use",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-desktop-after-runtime-controls",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-start-adopted",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-stop-adopted",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_stop_adopted_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-service-port-in-use",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_fails_on_port_in_use",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-runtime-after-shutdown-wait",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-mock-runtime -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-stop-adopted-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_stop_adopted_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-start-cases-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-desktop-app-after-goal-fix",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-journey-goal-parser",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app commands::journey::tests::parse_goal_accepts_ui_aliases",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-adopted-start",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-desktop-app-stop-crash-fix",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-stop-adopted-detach",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_stop_adopted_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-start-adopted-regression",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-stop-adopted-accurate-status",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_stop_adopted_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-after-stop-ux-fix",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
 		}
 	]
 }

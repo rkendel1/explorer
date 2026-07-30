@@ -18,7 +18,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Instant};
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -164,6 +164,7 @@ pub struct RuntimeState {
     pub state: Arc<RwLock<ResourceState>>,
     pub events: Option<Arc<EventEmitter>>,
     pub strict_validation: bool,
+    pub shutdown_tx: Option<Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>>,
 }
 
 impl RuntimeState {
@@ -181,6 +182,7 @@ impl RuntimeState {
             state: Arc::new(RwLock::new(ResourceState::default())),
             events: None,
             strict_validation: false,
+            shutdown_tx: None,
         }
     }
 
@@ -192,6 +194,24 @@ impl RuntimeState {
     pub fn with_strict_validation(mut self) -> Self {
         self.strict_validation = true;
         self
+    }
+
+    pub fn with_shutdown_sender(mut self, sender: tokio::sync::oneshot::Sender<()>) -> Self {
+        self.shutdown_tx = Some(Arc::new(Mutex::new(Some(sender))));
+        self
+    }
+
+    pub async fn request_shutdown(&self) -> bool {
+        let Some(shutdown_tx) = &self.shutdown_tx else {
+            return false;
+        };
+
+        let mut guard = shutdown_tx.lock().await;
+        if let Some(sender) = guard.take() {
+            sender.send(()).is_ok()
+        } else {
+            false
+        }
     }
 }
 
@@ -1149,6 +1169,17 @@ async fn catch_all(
     if path == "/__api/health" {
         return (StatusCode::OK, Json(json!({"status": "ok"}))).into_response();
     }
+    if path == "/__api/shutdown" && method == Method::POST {
+        let stopped = state.request_shutdown().await;
+        if stopped {
+            return Json(json!({"status": "shutting_down"})).into_response();
+        }
+        return (
+            StatusCode::CONFLICT,
+            Json(json!({"error": "shutdown unavailable"})),
+        )
+            .into_response();
+    }
     if path == "/__api/contract.json" {
         return Json(serde_json::to_value(&*state.contract).unwrap_or(json!({}))).into_response();
     }
@@ -1330,13 +1361,19 @@ pub async fn start_mock_server(
     scenarios: Vec<MockScenario>,
     stateful: bool,
 ) -> anyhow::Result<()> {
-    let state = RuntimeState::new(contract, seed, scenarios, stateful);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let state = RuntimeState::new(contract, seed, scenarios, stateful)
+        .with_shutdown_sender(shutdown_tx);
 
     let app = Router::new()
         .route("/{*path}", any(catch_all))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await?;
     Ok(())
 }
 
@@ -1349,13 +1386,20 @@ pub async fn start_mock_server_with_events(
     stateful: bool,
     events: EventEmitter,
 ) -> anyhow::Result<()> {
-    let state = RuntimeState::new(contract, seed, scenarios, stateful).with_events(events);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let state = RuntimeState::new(contract, seed, scenarios, stateful)
+        .with_events(events)
+        .with_shutdown_sender(shutdown_tx);
 
     let app = Router::new()
         .route("/{*path}", any(catch_all))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await?;
     Ok(())
 }
 
@@ -1374,12 +1418,19 @@ pub async fn start_mock_server_with_listener(
     stateful: bool,
     events: EventEmitter,
 ) -> anyhow::Result<()> {
-    let state = RuntimeState::new(contract, seed, scenarios, stateful).with_events(events);
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+    let state = RuntimeState::new(contract, seed, scenarios, stateful)
+        .with_events(events)
+        .with_shutdown_sender(shutdown_tx);
 
     let app = Router::new()
         .route("/{*path}", any(catch_all))
         .with_state(state);
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = shutdown_rx.await;
+        })
+        .await?;
     Ok(())
 }
 

@@ -9,6 +9,7 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use api_runtime_events::{EventEmitter, RuntimeEvent};
 use reqwest::StatusCode;
@@ -43,6 +44,7 @@ pub struct RuntimeStatusInfo {
     pub status: RuntimeStatus,
     pub address: Option<String>,
     pub port: Option<u16>,
+    pub managed_by_desktop: bool,
     pub uptime_seconds: Option<u64>,
     pub metrics: RuntimeMetricsInfo,
 }
@@ -88,19 +90,56 @@ pub struct RuntimeService;
 impl RuntimeService {
     /// Get runtime status
     pub async fn get_status(state: &Arc<DesktopStateManager>) -> ServiceResult<RuntimeStatusInfo> {
-        let runtime = state.runtime.read().await;
-        let metrics = Self::compute_metrics(state).await;
+        let (status, address, managed_by_desktop) = {
+            let runtime = state.runtime.read().await;
+            (
+                runtime.status,
+                runtime.address.clone(),
+                runtime.managed_by_desktop,
+            )
+        };
 
-        let port = runtime
-            .address
+        // If desktop state says stopped/error, still probe the configured/default
+        // runtime port so the UI reflects a runtime started elsewhere.
+        if matches!(status, RuntimeStatus::Stopped | RuntimeStatus::Error) {
+            let probe_port = address
+                .as_ref()
+                .and_then(|a| a.rsplit(':').next())
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(4010);
+
+            if let Some(detected_address) = Self::detect_running_runtime_address(probe_port).await {
+                state
+                    .set_runtime_state_with_ownership(
+                        RuntimeStatus::Running,
+                        Some(detected_address.clone()),
+                        false,
+                    )
+                    .await;
+
+                let metrics = Self::compute_metrics(state).await;
+                return Ok(RuntimeStatusInfo {
+                    status: RuntimeStatus::Running,
+                    address: Some(detected_address),
+                    port: Some(probe_port),
+                    managed_by_desktop: false,
+                    uptime_seconds: None,
+                    metrics,
+                });
+            }
+        }
+
+        let metrics = Self::compute_metrics(state).await;
+        let port = address
             .as_ref()
             .and_then(|a| a.rsplit(':').next())
             .and_then(|p| p.parse().ok());
 
         Ok(RuntimeStatusInfo {
-            status: runtime.status,
-            address: runtime.address.clone(),
+            status,
+            address,
             port,
+            managed_by_desktop,
             uptime_seconds: None, // Would need start time tracking
             metrics,
         })
@@ -126,7 +165,7 @@ impl RuntimeService {
             .ok_or_else(ServiceError::no_project)?;
 
         // Stop any previously running server first so restarts don't leak tasks/ports.
-        Self::stop_internal(state).await;
+        Self::stop_internal(state).await?;
 
         state.set_runtime_state(RuntimeStatus::Starting, None).await;
 
@@ -140,6 +179,24 @@ impl RuntimeService {
         let listener = match tokio::net::TcpListener::bind(bind_addr).await {
             Ok(listener) => listener,
             Err(e) => {
+                if let Some(detected_address) = Self::detect_running_runtime_address(config.port).await {
+                    state
+                        .set_runtime_state_with_ownership(
+                            RuntimeStatus::Running,
+                            Some(detected_address),
+                            false,
+                        )
+                        .await;
+
+                    let _ = CustomerJourneyService::complete_outcome(
+                        state,
+                        api_customer_journey::JourneyOutcome::MockReady,
+                    )
+                    .await;
+
+                    return Self::get_status(state).await;
+                }
+
                 state.set_runtime_state(RuntimeStatus::Error, None).await;
                 return Err(ServiceError::runtime_failed(&format!(
                     "port {} unavailable: {e}",
@@ -192,7 +249,7 @@ impl RuntimeService {
 
         let address = format!("http://{bind_addr}");
         state
-            .set_runtime_state(RuntimeStatus::Running, Some(address))
+            .set_runtime_state_with_ownership(RuntimeStatus::Running, Some(address), true)
             .await;
         state.update_runtime_metrics(0, 0).await;
 
@@ -207,23 +264,43 @@ impl RuntimeService {
 
     /// Stop the mock runtime, aborting the real server task if one is running.
     pub async fn stop(state: &Arc<DesktopStateManager>) -> ServiceResult<RuntimeStatusInfo> {
-        Self::stop_internal(state).await;
-        Self::get_status(state).await
+        Self::stop_internal(state).await?;
+        Self::status_without_probe(state).await
     }
 
-    async fn stop_internal(state: &Arc<DesktopStateManager>) {
-        let current = state.runtime.read().await.status;
+    async fn stop_internal(state: &Arc<DesktopStateManager>) -> ServiceResult<()> {
+        let (current, address, managed_by_desktop) = {
+            let runtime = state.runtime.read().await;
+            (
+                runtime.status,
+                runtime.address.clone(),
+                runtime.managed_by_desktop,
+            )
+        };
         if current == RuntimeStatus::Stopped {
-            return;
+            return Ok(());
+        }
+
+        // Runtime discovered on the port but not managed by this desktop
+        // process. Do not attempt to stop it and do not report local stop.
+        if !managed_by_desktop && state.runtime_server.read().await.is_none() {
+            return Ok(());
         }
 
         state.set_runtime_state(RuntimeStatus::Stopping, None).await;
 
         if let Some(server) = state.runtime_server.write().await.take() {
             server.abort().await;
+        } else if managed_by_desktop {
+            if let Some(base) = address {
+            let base = base.trim_end_matches('/').to_string();
+            Self::call_runtime_control_endpoint(&base, "/__api/shutdown").await?;
+            Self::wait_for_runtime_down(&base).await?;
+            }
         }
 
         state.set_runtime_state(RuntimeStatus::Stopped, None).await;
+        Ok(())
     }
 
     /// Restart the mock runtime
@@ -247,24 +324,16 @@ impl RuntimeService {
             }
         }
 
-        let was_running = state.runtime.read().await.status == RuntimeStatus::Running;
-        let port = state
-            .runtime
-            .read()
-            .await
-            .address
-            .as_ref()
-            .and_then(|a| a.rsplit(':').next())
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(4010);
+        let (was_running, address) = {
+            let runtime = state.runtime.read().await;
+            (runtime.status == RuntimeStatus::Running, runtime.address.clone())
+        };
 
         if was_running {
-            Self::restart(state, RuntimeConfig {
-                port,
-                profile_id: None,
-                auto_start: false,
-            })
-            .await
+            let base = address
+                .ok_or_else(|| ServiceError::runtime_failed("runtime has no address while marked running"))?;
+            Self::call_runtime_control_endpoint(base.trim_end_matches('/'), "/__api/state/reset").await?;
+            Self::get_status(state).await
         } else {
             state.update_runtime_metrics(0, 0).await;
             state.runtime_events.write().await.clear();
@@ -428,6 +497,102 @@ impl RuntimeService {
             .map_err(|e| ServiceError::runtime_failed(&format!("invalid state payload: {e}")))
     }
 
+    async fn status_without_probe(
+        state: &Arc<DesktopStateManager>,
+    ) -> ServiceResult<RuntimeStatusInfo> {
+        let (status, address, managed_by_desktop) = {
+            let runtime = state.runtime.read().await;
+            (
+                runtime.status,
+                runtime.address.clone(),
+                runtime.managed_by_desktop,
+            )
+        };
+        let metrics = Self::compute_metrics(state).await;
+        let port = address
+            .as_ref()
+            .and_then(|a| a.rsplit(':').next())
+            .and_then(|p| p.parse().ok());
+
+        Ok(RuntimeStatusInfo {
+            status,
+            address,
+            port,
+            managed_by_desktop,
+            uptime_seconds: None,
+            metrics,
+        })
+    }
+
+    async fn call_runtime_control_endpoint(base: &str, path: &str) -> ServiceResult<()> {
+        let url = format!("{base}{path}");
+        let response = reqwest::Client::new()
+            .post(&url)
+            .send()
+            .await
+            .map_err(|e| ServiceError::runtime_failed(&format!("runtime control failed: {e}")))?;
+
+        if response.status() != StatusCode::OK {
+            return Err(ServiceError::runtime_failed(&format!(
+                "runtime control failed with HTTP {}",
+                response.status()
+            )));
+        }
+
+        Ok(())
+    }
+
+    async fn wait_for_runtime_down(base: &str) -> ServiceResult<()> {
+        let health_url = format!("{base}/__api/health");
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(300))
+            .build()
+            .map_err(|e| ServiceError::runtime_failed(&format!("failed to build client: {e}")))?;
+
+        for _ in 0..20 {
+            let still_up = match client.get(&health_url).send().await {
+                Ok(response) => response.status() == StatusCode::OK,
+                Err(_) => false,
+            };
+
+            if !still_up {
+                return Ok(());
+            }
+
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Err(ServiceError::runtime_failed(
+            "runtime shutdown timed out; process still responding",
+        ))
+    }
+
+    async fn detect_running_runtime_address(port: u16) -> Option<String> {
+        let base = format!("http://127.0.0.1:{port}");
+        let health_url = format!("{base}/__api/health");
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(400))
+            .build()
+            .ok()?;
+
+        let response = client.get(&health_url).send().await.ok()?;
+        if response.status() != StatusCode::OK {
+            return None;
+        }
+
+        let payload = response.json::<serde_json::Value>().await.ok()?;
+        if payload
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            == Some("ok")
+        {
+            Some(base)
+        } else {
+            None
+        }
+    }
+
     /// Load mock scenario files from `.repo-api/scenarios/*.yaml`, if any.
     fn load_scenarios(root: &std::path::Path) -> Vec<api_mock_runtime::MockScenario> {
         let dir = root.join(".repo-api/scenarios");
@@ -582,6 +747,106 @@ mod tests {
             state.runtime.read().await.status,
             RuntimeStatus::Error
         );
+    }
+
+    #[tokio::test]
+    async fn test_start_reuses_existing_runtime_instance() {
+        let app_dir_a = tempdir().unwrap();
+        let app_dir_b = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        let state_a = Arc::new(DesktopStateManager::new(app_dir_a.path().to_path_buf()));
+        *state_a.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state_a.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        let port = free_port();
+        let started = RuntimeService::start(
+            &state_a,
+            RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(started.status, RuntimeStatus::Running);
+
+        let state_b = Arc::new(DesktopStateManager::new(app_dir_b.path().to_path_buf()));
+        *state_b.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state_b.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        let adopted = RuntimeService::start(
+            &state_b,
+            RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(adopted.status, RuntimeStatus::Running);
+        let expected = format!("http://127.0.0.1:{port}");
+        assert_eq!(adopted.address.as_deref(), Some(expected.as_str()));
+
+        RuntimeService::stop(&state_a).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_stop_adopted_runtime_instance() {
+        let app_dir_a = tempdir().unwrap();
+        let app_dir_b = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        let state_a = Arc::new(DesktopStateManager::new(app_dir_a.path().to_path_buf()));
+        *state_a.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state_a.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        let port = free_port();
+        RuntimeService::start(
+            &state_a,
+            RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let state_b = Arc::new(DesktopStateManager::new(app_dir_b.path().to_path_buf()));
+        *state_b.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state_b.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        RuntimeService::start(
+            &state_b,
+            RuntimeConfig {
+                port,
+                profile_id: None,
+                auto_start: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        let stopped = RuntimeService::stop(&state_b).await.unwrap();
+        assert_eq!(stopped.status, RuntimeStatus::Running);
+
+        let addr = format!("127.0.0.1:{port}");
+        assert!(tokio::net::TcpListener::bind(&addr).await.is_err());
+
+        // Cleanup: the original state owns the runtime process.
+        RuntimeService::stop(&state_a).await.unwrap();
+        assert!(tokio::net::TcpListener::bind(&addr).await.is_ok());
     }
 
     #[tokio::test]
