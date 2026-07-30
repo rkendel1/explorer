@@ -557,6 +557,18 @@
 				"-lc",
 				"cd apps/desktop && npm run lint && npm run build"
 			]
+		},
+		{
+			"label": "validate-project-recent-fix",
+			"type": "shell",
+			"command": "sh",
+			"args": [
+				"-lc",
+				"cargo check -p api-desktop-app && cd apps/desktop && npm run lint"
+			],
+			"problemMatcher": [
+				"$rustc"
+			]
 		}
 	]
 }

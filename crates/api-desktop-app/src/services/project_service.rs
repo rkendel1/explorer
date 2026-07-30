@@ -253,6 +253,10 @@ impl ProjectService {
 
         // Add to recent projects
         Self::add_to_recent_projects(state, path.clone(), project.name.clone()).await;
+        state
+            .save_recent_projects()
+            .await
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
 
         // Initialize workflows
         let workflows = Self::initialize_workflows(state, &path).await?;
