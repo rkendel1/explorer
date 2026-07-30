@@ -137,6 +137,48 @@ body {
   margin-bottom: 2rem;
 }
 
+.onboarding-preview {
+  text-align: left;
+  margin: 0 auto 1rem;
+  max-width: 640px;
+  border: 1px solid #e9ecef;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+}
+
+.onboarding-preview h3 {
+  font-size: 0.95rem;
+  margin-bottom: 0.5rem;
+}
+
+.onboarding-preview p {
+  font-size: 0.9rem;
+  color: #4b5563;
+}
+
+.path-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.path-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.95rem;
+}
+
+.path-input:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
+}
+
 .action-button {
   display: inline-flex;
   align-items: center;
@@ -176,6 +218,9 @@ body {
 .project-item {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  text-align: left;
+  background: white;
   padding: 1rem;
   border: 1px solid #e9ecef;
   border-radius: 0.5rem;
