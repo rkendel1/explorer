@@ -182,6 +182,12 @@
 			"type": "shell",
 			"command": "cargo test -p api-desktop-app test_parse_github_repository_https_url",
 			"problemMatcher": []
+		},
+		{
+			"label": "validate-environment-guidance-ui",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
 		}
 	]
 }

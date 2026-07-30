@@ -45,6 +45,12 @@ type JourneyState = {
   } | null;
 };
 
+type EnvironmentConfig = {
+  id: string;
+  name: string;
+  is_active: boolean;
+};
+
 type Outcome = {
   id: JourneyOutcome;
   label: string;
@@ -63,6 +69,7 @@ const ORDERED_OUTCOMES: Outcome[] = [
 function Workflows({ project, onNavigate }: WorkflowsProps) {
   const [journeyState, setJourneyState] = useState<JourneyState | null>(null);
   const [goal, setGoal] = useState<CustomerGoal | null>(null);
+  const [environments, setEnvironments] = useState<EnvironmentConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -72,6 +79,9 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
       const state = await invoke<JourneyState>('journey_state');
       setJourneyState(state);
       setGoal(state.selected_goal);
+
+      const envs = await invoke<EnvironmentConfig[]>('environment_list');
+      setEnvironments(envs);
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -278,6 +288,35 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
     }
   };
 
+  const ensureEnvironment = async (name: string, makeActive = true) => {
+    setError(null);
+    setIsBusy(true);
+    try {
+      const existing = environments.find((env) => env.id === name);
+      if (!existing) {
+        await invoke('environment_create', {
+          request: { name },
+        });
+      }
+
+      if (makeActive) {
+        await invoke('environment_select', {
+          request: { id: name },
+        });
+      }
+
+      await completeOutcome('environment_ready');
+      await loadJourneyState();
+      onNavigate('requests');
+    } catch (err) {
+      setError(errorMessage(err));
+      setIsBusy(false);
+    }
+  };
+
+  const activeEnvironment = environments.find((env) => env.is_active);
+  const environmentReady = journeyState?.completed_outcomes.includes('environment_ready');
+
   return (
     <div>
       <h2>Getting Started</h2>
@@ -315,6 +354,53 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           <p style={{ marginTop: '0.75rem', color: '#6c757d' }}>
             Selected goal: {goal.replace(/_/g, ' ')}
           </p>
+        )}
+      </div>
+
+      <div className="runtime-card" style={{ marginBottom: '1rem' }}>
+        <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Environment Setup</h3>
+        {!environmentReady ? (
+          <>
+            <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+              Pick where requests should run. Start with Mock for safe onboarding.
+            </p>
+            <div className="env-guide-list">
+              <div className="env-guide-item">
+                <strong>Mock (Recommended)</strong>
+                <span>Runs against local mock runtime. No real data changes.</span>
+                <button className="control-button" onClick={() => void ensureEnvironment('mock')} disabled={isBusy}>
+                  Use Mock
+                </button>
+              </div>
+              <div className="env-guide-item">
+                <strong>Development</strong>
+                <span>Use this when you have a dev backend URL ready.</span>
+                <button className="control-button" onClick={() => void ensureEnvironment('development')} disabled={isBusy}>
+                  Create Dev Starter
+                </button>
+              </div>
+              <div className="env-guide-item">
+                <strong>Staging</strong>
+                <span>Use this after validating request behavior in mock/dev.</span>
+                <button className="control-button" onClick={() => void ensureEnvironment('staging')} disabled={isBusy}>
+                  Create Staging Starter
+                </button>
+              </div>
+            </div>
+            <p className="env-help-copy" style={{ marginTop: '0.5rem' }}>
+              After choosing one, we will mark this step complete and take you to Requests.
+            </p>
+          </>
+        ) : (
+          <>
+            <p style={{ color: '#16a34a', marginBottom: '0.5rem' }}>
+              Environment configured.
+            </p>
+            <p className="env-help-copy">
+              Active: {activeEnvironment?.name ?? 'none'}.
+              You can switch environments from your next request setup.
+            </p>
+          </>
         )}
       </div>
 
