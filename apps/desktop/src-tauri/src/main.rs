@@ -106,6 +106,7 @@ fn main() {
             vault_unlock,
             vault_lock,
             vault_state,
+            vault_import_env,
             workflow_list,
             workflow_get,
             workflow_start,

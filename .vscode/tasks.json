@@ -422,6 +422,36 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
 			"problemMatcher": []
+		},
+		{
+			"label": "check-vault-env-import",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-vault-env-import",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_import_env_auth_entries",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-vault-env-import-ui",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-vault-env-import-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-vault-env-import-rerun",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app vault_service::tests::test_import_env_auth_entries",
+			"problemMatcher": []
 		}
 	]
 }

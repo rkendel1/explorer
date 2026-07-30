@@ -17,6 +17,8 @@ interface VaultEntryMetadata {
 function Vault({ project: _project }: VaultProps) {
   const [entries, setEntries] = useState<VaultEntryMetadata[]>([]);
   const [vaultLocked, setVaultLocked] = useState(true);
+  const [envPath, setEnvPath] = useState('.env');
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
@@ -105,6 +107,34 @@ function Vault({ project: _project }: VaultProps) {
     }
   };
 
+  const handleImportEnv = async () => {
+    setIsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const report = await invoke<{
+        file_path: string;
+        imported: string[];
+        skipped: string[];
+      }>('vault_import_env', {
+        request: { path: envPath.trim() || null },
+      });
+
+      await loadVaultEntries();
+
+      setNotice(
+        `Imported ${report.imported.length} auth secret(s) from ${report.file_path}.` +
+          (report.skipped.length > 0
+            ? ` Skipped ${report.skipped.length} non-auth variable(s).`
+            : '')
+      );
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   return (
     <div>
       <h2>Vault</h2>
@@ -116,6 +146,13 @@ function Vault({ project: _project }: VaultProps) {
         <div className="error-banner">
           <span>{error}</span>
           <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="success-banner">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)}>&times;</button>
         </div>
       )}
 
@@ -135,6 +172,27 @@ function Vault({ project: _project }: VaultProps) {
           </>
         )}
       </div>
+
+      {!vaultLocked && (
+        <div className="runtime-card" style={{ marginBottom: '1rem' }}>
+          <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>Import From .env</h3>
+          <p style={{ color: '#6c757d', marginBottom: '0.5rem' }}>
+            Loads auth-style variables (API keys/tokens) into Vault entries.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              className="url-input"
+              style={{ maxWidth: '420px' }}
+              value={envPath}
+              onChange={(event) => setEnvPath(event.target.value)}
+              placeholder=".env or config/.env.local"
+            />
+            <button className="control-button" onClick={handleImportEnv} disabled={isBusy}>
+              Import Auth Secrets
+            </button>
+          </div>
+        </div>
+      )}
 
       {vaultLocked ? (
         <div style={{ padding: '2rem', textAlign: 'center', color: '#6c757d' }}>

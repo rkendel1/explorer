@@ -45,6 +45,14 @@ pub struct VaultStateInfo {
     pub auto_lock_seconds: Option<u64>,
 }
 
+/// Result of importing auth secrets from a dotenv file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvImportReport {
+    pub file_path: String,
+    pub imported: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
 /// Authentication configuration (references vault, no secrets)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationConfig {
@@ -237,6 +245,77 @@ impl VaultService {
         })
     }
 
+    /// Import authentication-related entries from a dotenv file into the vault.
+    ///
+    /// By default this loads `<project-root>/.env`. A custom path may be
+    /// absolute or relative to the project root.
+    pub async fn import_env_auth_entries(
+        &self,
+        state: &Arc<DesktopStateManager>,
+        env_path: Option<&str>,
+    ) -> ServiceResult<EnvImportReport> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+
+        let vault_state = *state.vault_state.read().await;
+        if vault_state != VaultState::Unlocked {
+            return Err(ServiceError::vault_locked());
+        }
+
+        let root = state.active_root.read().await;
+        let root = root.as_ref().ok_or_else(ServiceError::no_project)?;
+
+        let path = if let Some(custom) = env_path {
+            let candidate = std::path::PathBuf::from(custom);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                root.join(candidate)
+            }
+        } else {
+            root.join(".env")
+        };
+
+        let content = std::fs::read_to_string(&path).map_err(|e| {
+            ServiceError::internal(&format!(
+                "Unable to read dotenv file '{}': {e}",
+                path.display()
+            ))
+        })?;
+
+        let store = VaultStore::open(root).map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        let mut imported = Vec::new();
+        let mut skipped = Vec::new();
+
+        for raw_line in content.lines() {
+            let Some((key, value)) = Self::parse_env_line(raw_line) else {
+                continue;
+            };
+
+            let Some(secret_type) = Self::classify_auth_secret_type(&key, &value) else {
+                skipped.push(key);
+                continue;
+            };
+
+            let entry_name = Self::to_vault_entry_name(&key);
+            let entry = store
+                .upsert_secret(&entry_name, secret_type, &value)
+                .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+            self.redaction.register_secret(&value);
+            imported.push(entry.name);
+        }
+
+        Ok(EnvImportReport {
+            file_path: path.display().to_string(),
+            imported,
+            skipped,
+        })
+    }
+
     /// Delete a vault entry
     pub async fn delete_entry(
         &self,
@@ -334,6 +413,68 @@ impl VaultService {
             .list_entries()
             .map_err(|e| ServiceError::internal(&e.to_string()))?;
         Ok(entries.len())
+    }
+
+    fn parse_env_line(line: &str) -> Option<(String, String)> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+
+        let stripped = trimmed
+            .strip_prefix("export ")
+            .unwrap_or(trimmed)
+            .trim();
+
+        let (raw_key, raw_value) = stripped.split_once('=')?;
+        let key = raw_key.trim();
+        if key.is_empty() {
+            return None;
+        }
+
+        let value_with_comment = raw_value.trim();
+        let mut value = value_with_comment.to_string();
+
+        if ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+            && value.len() >= 2
+        {
+            value = value[1..value.len() - 1].to_string();
+        } else if let Some((before_hash, _)) = value.split_once(" #") {
+            value = before_hash.trim().to_string();
+        }
+
+        Some((key.to_string(), value))
+    }
+
+    fn classify_auth_secret_type(key: &str, value: &str) -> Option<SecretType> {
+        let upper = key.to_uppercase();
+        if upper.contains("OAUTH") {
+            return Some(SecretType::OAuthToken);
+        }
+        if upper.contains("BASIC") && upper.contains("AUTH") {
+            return Some(SecretType::BasicAuth);
+        }
+        if upper.contains("API_KEY") || upper.contains("APIKEY") {
+            return Some(SecretType::ApiKey);
+        }
+        if upper.contains("TOKEN")
+            || upper == "AUTHORIZATION"
+            || value.starts_with("Bearer ")
+            || value.starts_with("bearer ")
+        {
+            return Some(SecretType::BearerToken);
+        }
+        None
+    }
+
+    fn to_vault_entry_name(key: &str) -> String {
+        key.to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string()
     }
 }
 
@@ -443,5 +584,33 @@ mod tests {
         // Use blocking API for sync test
         let vault_state = state.vault_state.blocking_read();
         assert_eq!(*vault_state, VaultState::Locked);
+    }
+
+    #[tokio::test]
+    async fn test_import_env_auth_entries() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        std::fs::write(
+            project_dir.path().join(".env"),
+            "API_KEY=abc123\nINTERNAL_FLAG=true\nAUTH_TOKEN=token-xyz\n",
+        )
+        .unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(create_test_project(project_dir.path()));
+
+        let service = VaultService::new();
+        service.unlock(&state, None).await.unwrap();
+
+        let report = service
+            .import_env_auth_entries(&state, None)
+            .await
+            .unwrap();
+
+        assert!(report.imported.iter().any(|n| n == "api-key"));
+        assert!(report.imported.iter().any(|n| n == "auth-token"));
+        assert!(report.skipped.iter().any(|n| n == "INTERNAL_FLAG"));
     }
 }

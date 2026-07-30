@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::VaultEntryMetadata;
 use crate::services::VaultService;
+use crate::services::vault_service::EnvImportReport;
 
 use super::{AppState, CommandResult, from_service, state_handle};
 
@@ -28,6 +29,13 @@ pub struct DeleteVaultEntryRequest {
 #[serde(rename_all = "camelCase")]
 pub struct UnlockVaultRequest {
     pub passphrase: Option<String>,
+}
+
+/// Import dotenv secrets into vault request
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportVaultEnvRequest {
+    pub path: Option<String>,
 }
 
 /// Vault state response
@@ -115,4 +123,18 @@ pub async fn vault_lock(state: AppState<'_>) -> CommandResult<VaultStateResponse
 pub async fn vault_state(state: AppState<'_>) -> CommandResult<VaultStateResponse> {
     let state = state_handle(&state);
     from_service(vault_service().get_state(&state).await).map(Into::into)
+}
+
+/// Import auth-focused dotenv values into vault
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn vault_import_env(
+    state: AppState<'_>,
+    request: ImportVaultEnvRequest,
+) -> CommandResult<EnvImportReport> {
+    let state = state_handle(&state);
+    from_service(
+        vault_service()
+            .import_env_auth_entries(&state, request.path.as_deref())
+            .await,
+    )
 }
