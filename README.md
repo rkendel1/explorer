@@ -7,7 +7,7 @@
 Run this from the repository root:
 
 ```bash
-./scripts/dev-platform.sh
+make dev
 ```
 
 This command starts:
