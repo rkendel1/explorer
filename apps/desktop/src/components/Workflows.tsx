@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { errorMessage } from '../lib/errors';
 import type { Project } from '../App';
 
 type NavigationItem =
@@ -23,27 +25,102 @@ type CustomerGoal =
   | 'test_my_api'
   | 'explore_my_api';
 
-type Outcome = {
-  id: string;
-  label: string;
-  completed: boolean;
+type JourneyOutcome =
+  | 'repository_connected'
+  | 'api_discovered'
+  | 'first_request'
+  | 'environment_ready'
+  | 'reusable_request'
+  | 'mock_ready'
+  | 'test_complete';
+
+type JourneyState = {
+  selected_goal: CustomerGoal | null;
+  completed_outcomes: JourneyOutcome[];
+  current_recommendation: {
+    id: string;
+    title: string;
+    description: string;
+    primary_action: string;
+  } | null;
 };
 
+type Outcome = {
+  id: JourneyOutcome;
+  label: string;
+};
+
+const ORDERED_OUTCOMES: Outcome[] = [
+  { id: 'repository_connected', label: 'Connected your repository' },
+  { id: 'api_discovered', label: 'Mapped your API' },
+  { id: 'first_request', label: 'Sent a successful request' },
+  { id: 'environment_ready', label: 'Configured an environment' },
+  { id: 'reusable_request', label: 'Created a reusable request' },
+  { id: 'mock_ready', label: 'Started a mock API' },
+  { id: 'test_complete', label: 'Ran your first test' },
+];
+
 function Workflows({ project, onNavigate }: WorkflowsProps) {
+  const [journeyState, setJourneyState] = useState<JourneyState | null>(null);
   const [goal, setGoal] = useState<CustomerGoal | null>(null);
-  const [outcomes, setOutcomes] = useState<Outcome[]>([
-    { id: 'repository_connected', label: 'Connected your repository', completed: true },
-    {
-      id: 'api_discovered',
-      label: 'Mapped your API',
-      completed: (project.endpointCount ?? 0) > 0,
-    },
-    { id: 'first_request', label: 'Sent a successful request', completed: false },
-    { id: 'environment_ready', label: 'Configured an environment', completed: false },
-    { id: 'reusable_request', label: 'Created a reusable request', completed: false },
-    { id: 'mock_ready', label: 'Started a mock API', completed: false },
-    { id: 'test_complete', label: 'Ran your first test', completed: false },
-  ]);
+  const [error, setError] = useState<string | null>(null);
+  const [isBusy, setIsBusy] = useState(false);
+
+  const loadJourneyState = async () => {
+    setError(null);
+    try {
+      const state = await invoke<JourneyState>('journey_state');
+      setJourneyState(state);
+      setGoal(state.selected_goal);
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  };
+
+  useEffect(() => {
+    loadJourneyState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project.path]);
+
+  const completeOutcome = async (outcome: JourneyOutcome) => {
+    setError(null);
+    setIsBusy(true);
+    try {
+      await invoke('journey_complete_outcome', {
+        request: { outcome },
+      });
+      await loadJourneyState();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const selectGoal = async (nextGoal: CustomerGoal) => {
+    setGoal(nextGoal);
+    setError(null);
+    setIsBusy(true);
+    try {
+      await invoke('journey_select_goal', {
+        request: { goal: nextGoal },
+      });
+      await loadJourneyState();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const outcomes = useMemo(
+    () =>
+      ORDERED_OUTCOMES.map((step) => ({
+        ...step,
+        completed: journeyState?.completed_outcomes.includes(step.id) ?? false,
+      })),
+    [journeyState],
+  );
 
   const completed = outcomes.filter((o) => o.completed).length;
   const total = outcomes.length;
@@ -52,6 +129,63 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
   const nextOutcome = outcomes.find((o) => !o.completed);
 
   const recommendation = (() => {
+    if (journeyState?.current_recommendation) {
+      const id = journeyState.current_recommendation.id;
+      if (id === 'discover-api') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: async () => {
+            if (!journeyState.completed_outcomes.includes('api_discovered')) {
+              await completeOutcome('api_discovered');
+            }
+            onNavigate('explorer');
+          },
+        };
+      }
+      if (id === 'first-request') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: () => onNavigate('requests'),
+        };
+      }
+      if (id === 'setup-environment') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: () => onNavigate('requests'),
+        };
+      }
+      if (id === 'save-request') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: () => onNavigate('requests'),
+        };
+      }
+      if (id === 'start-mock') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: () => onNavigate('runtime'),
+        };
+      }
+      if (id === 'run-test') {
+        return {
+          title: journeyState.current_recommendation.title,
+          description: journeyState.current_recommendation.description,
+          actionLabel: journeyState.current_recommendation.primary_action,
+          action: () => onNavigate('tests'),
+        };
+      }
+    }
+
     if (!nextOutcome) {
       return {
         title: 'Your API Workspace Is Ready',
@@ -67,8 +201,8 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           title: 'Review what we discovered',
           description: 'We found your API. Review endpoints and models before continuing.',
           actionLabel: 'Review Your API',
-          action: () => {
-            markOutcome('api_discovered');
+          action: async () => {
+            await completeOutcome('api_discovered');
             onNavigate('explorer');
           },
         };
@@ -78,9 +212,10 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           description: 'Choose a safe endpoint and send your first API request.',
           actionLabel: 'Try An Endpoint',
           action: () => {
-            setGoal(goal ?? 'try_endpoint');
+            if (!goal) {
+              void selectGoal('try_endpoint');
+            }
             onNavigate('requests');
-            markOutcome('first_request');
           },
         };
       case 'environment_ready':
@@ -88,37 +223,28 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           title: 'Choose how to run your API',
           description: 'Use mock, development, or staging as your first runtime target.',
           actionLabel: 'Configure Environment',
-          action: () => {
-            onNavigate('requests');
-            markOutcome('environment_ready');
-          },
+          action: () => onNavigate('requests'),
         };
       case 'reusable_request':
         return {
           title: 'Make it repeatable',
           description: 'Save your working request so it can be re-used in tests.',
           actionLabel: 'Save Request',
-          action: () => markOutcome('reusable_request'),
+          action: () => onNavigate('requests'),
         };
       case 'mock_ready':
         return {
           title: 'Run through a mock environment',
           description: 'Start a local mock API generated from your API contract.',
           actionLabel: 'Start Mock API',
-          action: () => {
-            onNavigate('runtime');
-            markOutcome('mock_ready');
-          },
+          action: () => onNavigate('runtime'),
         };
       case 'test_complete':
         return {
           title: 'Validate it with tests',
           description: 'Run a first test to make behavior safe and repeatable.',
           actionLabel: 'Run First Test',
-          action: () => {
-            onNavigate('tests');
-            markOutcome('test_complete');
-          },
+          action: () => onNavigate('tests'),
         };
       default:
         return {
@@ -130,8 +256,27 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
     }
   })();
 
-  const markOutcome = (id: string) => {
-    setOutcomes((prev) => prev.map((o) => (o.id === id ? { ...o, completed: true } : o)));
+  const deferCurrentAction = async () => {
+    if (!journeyState?.current_recommendation) {
+      return;
+    }
+
+    setError(null);
+    setIsBusy(true);
+    try {
+      await invoke('journey_defer_action', {
+        request: {
+          id: journeyState.current_recommendation.id,
+          title: journeyState.current_recommendation.title,
+          reason: 'postponed from workflows panel',
+        },
+      });
+      await loadJourneyState();
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   return (
@@ -141,13 +286,20 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
         Connect repository → discover API → first successful request → mock → tests
       </p>
 
+      {error && (
+        <div className="error-banner">
+          <span>{error}</span>
+          <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
       <div className="runtime-card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>{recommendation.title}</h3>
         <p style={{ color: '#6c757d', marginBottom: '0.75rem' }}>{recommendation.description}</p>
-        <button className="action-button" onClick={recommendation.action}>
+        <button className="action-button" onClick={() => void recommendation.action()} disabled={isBusy}>
           {recommendation.actionLabel}
         </button>
-        <button className="control-button" style={{ marginLeft: '0.5rem' }}>
+        <button className="control-button" style={{ marginLeft: '0.5rem' }} onClick={() => void deferCurrentAction()} disabled={isBusy}>
           Do This Later
         </button>
       </div>
@@ -155,10 +307,10 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
       <div className="runtime-card" style={{ marginBottom: '1rem' }}>
         <h3 style={{ fontSize: '1rem', marginBottom: '0.5rem' }}>What Would You Like To Do?</h3>
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button className="control-button" onClick={() => setGoal('try_endpoint')}>Try An Endpoint</button>
-          <button className="control-button" onClick={() => setGoal('create_mock_api')}>Create A Mock API</button>
-          <button className="control-button" onClick={() => setGoal('test_my_api')}>Test My API</button>
-          <button className="control-button" onClick={() => setGoal('explore_my_api')}>Explore My API</button>
+          <button className="control-button" onClick={() => void selectGoal('try_endpoint')} disabled={isBusy}>Try An Endpoint</button>
+          <button className="control-button" onClick={() => void selectGoal('create_mock_api')} disabled={isBusy}>Create A Mock API</button>
+          <button className="control-button" onClick={() => void selectGoal('test_my_api')} disabled={isBusy}>Test My API</button>
+          <button className="control-button" onClick={() => void selectGoal('explore_my_api')} disabled={isBusy}>Explore My API</button>
         </div>
         {goal && (
           <p style={{ marginTop: '0.75rem', color: '#6c757d' }}>

@@ -70,6 +70,7 @@ fn main() {
             environment_create,
             environment_delete,
             journey_get,
+            journey_state,
             journey_select_goal,
             journey_complete_outcome,
             journey_defer_action,

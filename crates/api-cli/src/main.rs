@@ -4,14 +4,16 @@ use api_compiler::{
 };
 use api_core::{ApiMetadata, ApiToolError, HttpMethod, SchemaRegistry};
 use api_discovery::{DiscoveryEngine, build_context};
-use api_testing::{SuiteResult, generate_junit_report};
+use api_testing::{SuiteResult, TestResult, generate_junit_report};
 use api_vault::{SecretType, VaultStore, redact};
 use api_watch::WatchConfig;
 use clap::{Parser, Subcommand};
+use std::collections::BTreeMap;
 use std::{
     fs,
     net::SocketAddr,
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 #[derive(Parser)]
@@ -361,6 +363,170 @@ fn parse_secret_type(kind: &str) -> anyhow::Result<SecretType> {
     }
 }
 
+fn parse_http_method(method: &str) -> anyhow::Result<HttpMethod> {
+    match method.to_uppercase().as_str() {
+        "GET" => Ok(HttpMethod::GET),
+        "POST" => Ok(HttpMethod::POST),
+        "PUT" => Ok(HttpMethod::PUT),
+        "PATCH" => Ok(HttpMethod::PATCH),
+        "DELETE" => Ok(HttpMethod::DELETE),
+        "OPTIONS" => Ok(HttpMethod::OPTIONS),
+        "HEAD" => Ok(HttpMethod::HEAD),
+        _ => anyhow::bail!("unsupported method '{method}'"),
+    }
+}
+
+fn resolve_runtime_base_url(repository: &Path) -> anyhow::Result<String> {
+    let envs = api_storage::load_environments(repository)?;
+    let environment = envs
+        .iter()
+        .find(|e| e.name == "mock")
+        .or_else(|| envs.first())
+        .ok_or_else(|| anyhow::anyhow!("no environments found"))?;
+
+    let base = environment
+        .variables
+        .get("baseUrl")
+        .cloned()
+        .unwrap_or_else(|| "http://127.0.0.1:4010".to_string());
+    Ok(base.trim_end_matches('/').to_string())
+}
+
+async fn export_runtime_state_live(repository: &Path) -> anyhow::Result<serde_json::Value> {
+    let base = resolve_runtime_base_url(repository)?;
+    let url = format!("{base}/__api/state/export");
+    let client = reqwest::Client::new();
+    let response = client.get(&url).send().await?;
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "failed to export runtime state from {}: HTTP {}",
+            url,
+            response.status()
+        );
+    }
+    Ok(response.json::<serde_json::Value>().await?)
+}
+
+async fn import_runtime_state_live(repository: &Path, snapshot: &serde_json::Value) -> anyhow::Result<()> {
+    let base = resolve_runtime_base_url(repository)?;
+    let url = format!("{base}/__api/state/import");
+    let client = reqwest::Client::new();
+    let response = client.post(&url).json(snapshot).send().await?;
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "failed to import runtime state into {}: HTTP {}",
+            url,
+            response.status()
+        );
+    }
+    Ok(())
+}
+
+async fn reset_runtime_state_live(repository: &Path) -> anyhow::Result<()> {
+    let base = resolve_runtime_base_url(repository)?;
+    let url = format!("{base}/__api/state/reset");
+    let client = reqwest::Client::new();
+    let response = client.post(&url).send().await?;
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "failed to reset runtime state at {}: HTTP {}",
+            url,
+            response.status()
+        );
+    }
+    Ok(())
+}
+
+async fn run_test_suite_file(
+    repository: &Path,
+    suite_path: &Path,
+    default_environment: &str,
+    contract: &api_core::ApiContract,
+) -> anyhow::Result<SuiteResult> {
+    let suite = api_testing::load_test_suite(suite_path)?;
+
+    let env_name = suite
+        .environment
+        .clone()
+        .unwrap_or_else(|| default_environment.to_string());
+
+    let envs = api_storage::load_environments(repository)?;
+    let env = envs
+        .into_iter()
+        .find(|e| e.name == env_name)
+        .ok_or(api_core::ApiToolError::EnvironmentNotFound)?;
+
+    let mut test_results: Vec<TestResult> = Vec::new();
+
+    for test in &suite.tests {
+        if !test.enabled {
+            continue;
+        }
+
+        let started = Instant::now();
+        let run = async {
+            let saved = api_storage::load_saved_request(repository, &test.request_id)
+                .map_err(|e| anyhow::anyhow!("saved request '{}': {e}", test.request_id))?;
+
+            let headers: BTreeMap<String, String> = saved.headers.clone().unwrap_or_default();
+            let outcome = if let Some(endpoint_id) = saved.endpoint_id.as_deref() {
+                api_client::execute_endpoint_full(
+                    repository,
+                    contract,
+                    endpoint_id,
+                    &env,
+                    Some(&headers),
+                    saved.body.clone(),
+                )
+                .await?
+            } else if let Some(url) = saved.url.as_deref() {
+                let method = parse_http_method(&saved.method)?;
+                let rendered_url = api_client::render_template(url, &env.variables);
+                api_client::execute_url_full(
+                    repository,
+                    method,
+                    &rendered_url,
+                    Some(&headers),
+                    saved.body.clone(),
+                )
+                .await?
+            } else {
+                anyhow::bail!(
+                    "saved request '{}' has neither endpoint_id nor url",
+                    saved.name
+                );
+            };
+
+            let response = api_testing::ResponseData {
+                status: outcome.status,
+                headers: outcome.headers.into_iter().collect::<BTreeMap<_, _>>(),
+                body: outcome.body,
+                duration_ms: started.elapsed().as_millis() as u64,
+            };
+            let assertion_results = api_testing::evaluate_assertions(&test.assertions, &response);
+            let extracted = api_testing::extract_variables(&test.extract, &response);
+            Ok::<TestResult, anyhow::Error>(api_testing::TestResult::success(
+                test,
+                assertion_results,
+                extracted,
+                started.elapsed().as_millis() as u64,
+            ))
+        }
+        .await;
+
+        match run {
+            Ok(result) => test_results.push(result),
+            Err(e) => test_results.push(api_testing::TestResult::failure(test, e.to_string())),
+        }
+
+        if suite.stop_on_failure && test_results.last().is_some_and(|r| !r.passed) {
+            break;
+        }
+    }
+
+    Ok(SuiteResult::new(&suite, test_results))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -680,13 +846,9 @@ scenarios:
         Commands::State { command } => match command {
             StateCommands::Export {
                 output,
-                repository: _,
+                repository,
             } => {
-                // Export current mock state to file
-                let state_json = serde_json::json!({
-                    "resources": {},
-                    "exported_at": chrono::Utc::now().to_rfc3339()
-                });
+                let state_json = export_runtime_state_live(&repository).await?;
                 if let Some(parent) = output.parent() {
                     fs::create_dir_all(parent)?;
                 }
@@ -695,15 +857,18 @@ scenarios:
             }
             StateCommands::Import {
                 input,
-                repository: _,
+                repository,
             } => {
                 if input.exists() {
+                    let data = serde_json::from_slice::<serde_json::Value>(&fs::read(&input)?)?;
+                    import_runtime_state_live(&repository, &data).await?;
                     println!("State imported from: {}", input.display());
                 } else {
                     anyhow::bail!("State file not found: {}", input.display());
                 }
             }
-            StateCommands::Reset { repository: _ } => {
+            StateCommands::Reset { repository } => {
+                reset_runtime_state_live(&repository).await?;
                 println!("State reset");
             }
         },
@@ -716,52 +881,60 @@ scenarios:
         } => {
             let repository =
                 repository.ok_or_else(|| anyhow::anyhow!("--repository is required"))?;
-            let envs = api_storage::load_environments(&repository)?;
-            let env = envs
-                .into_iter()
-                .find(|e| e.name == environment)
-                .ok_or(api_core::ApiToolError::EnvironmentNotFound)?;
-
             let suites_path = repository.join(".repo-api/tests/suites");
+            let contract = api_storage::load_effective_contract(&repository)?;
             let mut results: Vec<SuiteResult> = Vec::new();
 
             if all {
                 if suites_path.exists() {
                     for entry in fs::read_dir(&suites_path)? {
                         let entry = entry?;
-                        if let Some(name) = entry.path().file_stem() {
-                            println!("Running suite: {}", name.to_string_lossy());
-                            // Run each suite
-                            let result = SuiteResult {
-                                suite_id: format!("suite_{}", name.to_string_lossy()),
-                                suite_name: name.to_string_lossy().to_string(),
-                                passed: 0,
-                                failed: 0,
-                                skipped: 0,
-                                total_duration_ms: 0,
-                                test_results: vec![],
-                                executed_at: chrono::Utc::now(),
-                            };
+                        let path = entry.path();
+                        if path.extension().and_then(|ext| ext.to_str()) == Some("yaml") {
+                            println!(
+                                "Running suite: {}",
+                                path.file_stem()
+                                    .and_then(|s| s.to_str())
+                                    .unwrap_or("(unknown)")
+                            );
+                            let result =
+                                run_test_suite_file(&repository, &path, &environment, &contract)
+                                    .await?;
+                            print!("{}", api_testing::format_test_results(&result));
                             results.push(result);
                         }
                     }
                 }
             } else if let Some(suite_name) = suite {
-                println!(
-                    "Running suite: {} with environment: {}",
-                    suite_name, env.name
-                );
-                let result = SuiteResult {
-                    suite_id: format!("suite_{}", suite_name),
-                    suite_name,
-                    passed: 0,
-                    failed: 0,
-                    skipped: 0,
-                    total_duration_ms: 0,
-                    test_results: vec![],
-                    executed_at: chrono::Utc::now(),
+                let direct_path = suites_path.join(format!("{}.yaml", suite_name));
+                let selected_path = if direct_path.exists() {
+                    direct_path
+                } else {
+                    let mut match_by_title: Option<PathBuf> = None;
+                    for path in fs::read_dir(&suites_path)?
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.path())
+                        .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("yaml"))
+                    {
+                        let loaded = api_testing::load_test_suite(&path)?;
+                        if loaded.name == suite_name {
+                            match_by_title = Some(path);
+                            break;
+                        }
+                    }
+                    match_by_title.ok_or_else(|| {
+                        anyhow::anyhow!("suite '{}' not found in {}", suite_name, suites_path.display())
+                    })?
                 };
+
+                println!("Running suite: {}", suite_name);
+                let result =
+                    run_test_suite_file(&repository, &selected_path, &environment, &contract)
+                        .await?;
+                print!("{}", api_testing::format_test_results(&result));
                 results.push(result);
+            } else {
+                anyhow::bail!("Specify --all or --suite <name>");
             }
 
             // Print summary
@@ -781,6 +954,10 @@ scenarios:
                 }
                 fs::write(&report_path, junit)?;
                 println!("Report written to: {}", report_path.display());
+            }
+
+            if total_failed > 0 {
+                anyhow::bail!("{} test(s) failed", total_failed);
             }
         }
         Commands::Environment { command } => match command {

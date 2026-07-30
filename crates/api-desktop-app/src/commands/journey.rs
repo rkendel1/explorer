@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use api_customer_journey::{CustomerGoal, CustomerJourney, DeferredAction, JourneyOutcome};
+use api_customer_journey::{
+    CustomerGoal, CustomerJourney, CustomerJourneyState, DeferredAction, JourneyOutcome,
+};
 
 use crate::services::CustomerJourneyService;
 
@@ -61,6 +63,12 @@ fn parse_outcome(value: &str) -> Option<JourneyOutcome> {
 pub async fn journey_get(state: AppState<'_>) -> CommandResult<CustomerJourney> {
     let state = state_handle(&state);
     from_service(CustomerJourneyService::get(&state).await)
+}
+
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn journey_state(state: AppState<'_>) -> CommandResult<CustomerJourneyState> {
+    let state = state_handle(&state);
+    from_service(CustomerJourneyService::get_state(&state).await)
 }
 
 #[cfg_attr(feature = "tauri", tauri::command)]

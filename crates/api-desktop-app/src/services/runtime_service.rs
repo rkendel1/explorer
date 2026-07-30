@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use api_runtime_events::{EventEmitter, RuntimeEvent};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::RuntimeStatus;
@@ -72,10 +73,8 @@ pub struct RuntimeEventInfo {
 
 /// Runtime state export/import.
 ///
-/// `resources` is best-effort: the running mock server doesn't currently
-/// expose a hook into its live in-memory resource state (that would need a
-/// change to `api-mock-runtime` itself), so exports only include scenario
-/// configuration and recent events, not live CRUD resource data.
+/// `resources` is the live `api-mock-runtime` state payload returned by
+/// `GET /__api/state/export` (including both `resources` and counters).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RuntimeStateSnapshot {
     pub scenarios: Vec<serde_json::Value>,
@@ -274,7 +273,7 @@ impl RuntimeService {
     }
 
     /// Export runtime state. See `RuntimeStateSnapshot` docs for the
-    /// `resources` limitation.
+    /// wire format.
     pub async fn export_state(
         state: &Arc<DesktopStateManager>,
     ) -> ServiceResult<RuntimeStateSnapshot> {
@@ -290,29 +289,42 @@ impl RuntimeService {
             .filter_map(|s| serde_json::to_value(s).ok())
             .collect();
 
+        let resources = Self::fetch_live_state_payload(state).await?;
+
         Ok(RuntimeStateSnapshot {
             scenarios,
-            resources: serde_json::json!({
-                "unavailable": "live resource state introspection is not implemented yet"
-            }),
+            resources,
             timestamp: chrono::Utc::now(),
         })
     }
 
-    /// Import runtime state. Not implemented - returns a clear error rather
-    /// than silently accepting a snapshot it can't apply.
+    /// Import runtime state into the running mock server.
     pub async fn import_state(
         state: &Arc<DesktopStateManager>,
-        _snapshot: RuntimeStateSnapshot,
+        snapshot: RuntimeStateSnapshot,
     ) -> ServiceResult<()> {
         let project = state.project.read().await;
         if project.is_none() {
             return Err(ServiceError::no_project());
         }
 
-        Err(ServiceError::validation(
-            "Importing runtime state isn't supported yet",
-        ))
+        let base = Self::running_runtime_base_url(state).await?;
+        let url = format!("{base}/__api/state/import");
+        let response = reqwest::Client::new()
+            .post(&url)
+            .json(&snapshot.resources)
+            .send()
+            .await
+            .map_err(|e| ServiceError::runtime_failed(&format!("state import failed: {e}")))?;
+
+        if response.status() != StatusCode::OK {
+            return Err(ServiceError::runtime_failed(&format!(
+                "state import failed with HTTP {}",
+                response.status()
+            )));
+        }
+
+        Ok(())
     }
 
     /// Get recent runtime events (most recent first)
@@ -374,6 +386,46 @@ impl RuntimeService {
             scenario_matches,
             average_duration_ms,
         }
+    }
+
+    async fn running_runtime_base_url(state: &Arc<DesktopStateManager>) -> ServiceResult<String> {
+        let runtime = state.runtime.read().await;
+        if runtime.status != RuntimeStatus::Running {
+            return Err(ServiceError::validation(
+                "Runtime must be running to export or import state",
+            ));
+        }
+
+        let address = runtime.address.clone().ok_or_else(|| {
+            ServiceError::runtime_failed("runtime has no address while marked running")
+        })?;
+
+        Ok(address.trim_end_matches('/').to_string())
+    }
+
+    async fn fetch_live_state_payload(
+        state: &Arc<DesktopStateManager>,
+    ) -> ServiceResult<serde_json::Value> {
+        let base = Self::running_runtime_base_url(state).await?;
+        let url = format!("{base}/__api/state/export");
+
+        let response = reqwest::Client::new()
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| ServiceError::runtime_failed(&format!("state export failed: {e}")))?;
+
+        if response.status() != StatusCode::OK {
+            return Err(ServiceError::runtime_failed(&format!(
+                "state export failed with HTTP {}",
+                response.status()
+            )));
+        }
+
+        response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| ServiceError::runtime_failed(&format!("invalid state payload: {e}")))
     }
 
     /// Load mock scenario files from `.repo-api/scenarios/*.yaml`, if any.
