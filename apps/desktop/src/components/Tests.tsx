@@ -41,6 +41,7 @@ function Tests({ project: _project }: TestsProps) {
   const [run, setRun] = useState<TestRunResult | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [selectedTest, setSelectedTest] = useState<TestResultDetail | null>(null);
 
   useEffect(() => {
@@ -51,7 +52,22 @@ function Tests({ project: _project }: TestsProps) {
     setError(null);
     try {
       const result = await invoke<TestSuiteSummary[]>('test_list');
-      setSuites(result);
+      if (result.length > 0) {
+        setSuites(result);
+        return;
+      }
+
+      const prepared = await invoke<{
+        created_suite: boolean;
+        created_request: boolean;
+      }>('test_prepare_onboarding');
+
+      const refreshed = await invoke<TestSuiteSummary[]>('test_list');
+      setSuites(refreshed);
+
+      if (prepared.created_suite) {
+        setNotice('Created a starter test suite from your discovered API.');
+      }
     } catch (err) {
       setError(errorMessage(err));
     }
@@ -104,6 +120,13 @@ function Tests({ project: _project }: TestsProps) {
         <div className="error-banner">
           <span>{error}</span>
           <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
+      {notice && (
+        <div className="success-banner">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)}>&times;</button>
         </div>
       )}
 

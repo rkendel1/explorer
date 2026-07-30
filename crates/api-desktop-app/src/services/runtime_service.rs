@@ -117,6 +117,12 @@ impl RuntimeService {
                     )
                     .await;
 
+                let _ = CustomerJourneyService::complete_outcome(
+                    state,
+                    api_customer_journey::JourneyOutcome::MockReady,
+                )
+                .await;
+
                 let metrics = Self::compute_metrics(state).await;
                 return Ok(RuntimeStatusInfo {
                     status: RuntimeStatus::Running,

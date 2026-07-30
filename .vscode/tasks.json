@@ -356,6 +356,48 @@
 			"type": "shell",
 			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
 			"problemMatcher": []
+		},
+		{
+			"label": "check-runtime-hint-change",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-runtime-hint-change",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-mock-ready-autocomplete",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-runtime-start-regression-after-mockready",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app runtime_service::tests::test_start_reuses_existing_runtime_instance",
+			"problemMatcher": []
+		},
+		{
+			"label": "check-desktop-app-onboarding-tests-flow",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "test-testing-service-onboarding-bootstrap",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer && cargo test -p api-desktop-app testing_service::tests::test_prepare_onboarding_creates_suite_when_missing",
+			"problemMatcher": []
+		},
+		{
+			"label": "lint-build-desktop-onboarding-tests-flow",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
 		}
 	]
 }

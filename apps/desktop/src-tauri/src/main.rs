@@ -99,6 +99,7 @@ fn main() {
             test_run,
             test_result,
             test_export,
+            test_prepare_onboarding,
             vault_list,
             vault_create,
             vault_delete,

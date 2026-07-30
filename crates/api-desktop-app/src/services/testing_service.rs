@@ -66,6 +66,14 @@ pub struct TestCaseInfo {
     pub last_result: Option<TestResultSummary>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrepareOnboardingResult {
+    pub created_suite: bool,
+    pub created_request: bool,
+    pub suite_id: Option<String>,
+    pub request_name: Option<String>,
+}
+
 /// Test result summary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResultSummary {
@@ -127,6 +135,132 @@ impl TestingService {
             .collect();
         paths.sort();
         paths
+    }
+
+    fn join_url(base: &str, path: &str) -> String {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return path.to_string();
+        }
+        let normalized = if path.starts_with('/') {
+            path.to_string()
+        } else {
+            format!("/{path}")
+        };
+        format!("{}{}", base.trim_end_matches('/'), normalized)
+    }
+
+    fn default_request_name(method: &str, path: &str) -> String {
+        let compact = path
+            .trim_matches('/')
+            .replace('/', "-")
+            .replace('{', "")
+            .replace('}', "");
+        if compact.is_empty() {
+            format!("{}-root", method.to_lowercase())
+        } else {
+            format!("{}-{}", method.to_lowercase(), compact)
+        }
+    }
+
+    /// Ensure onboarding has at least one runnable test suite.
+    ///
+    /// If suites already exist, this is a no-op. Otherwise it creates a
+    /// starter saved request (if needed) and writes
+    /// `.repo-api/tests/suites/onboarding-first-test.yaml`.
+    pub async fn prepare_onboarding(
+        state: &Arc<DesktopStateManager>,
+    ) -> ServiceResult<PrepareOnboardingResult> {
+        let project = state.project.read().await;
+        if project.is_none() {
+            return Err(ServiceError::no_project());
+        }
+        drop(project);
+
+        let root = state
+            .active_root
+            .read()
+            .await
+            .clone()
+            .ok_or_else(ServiceError::no_project)?;
+
+        let existing_paths = Self::all_suite_paths(&root);
+        if let Some(path) = existing_paths.first() {
+            let suite_id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(str::to_string);
+            return Ok(PrepareOnboardingResult {
+                created_suite: false,
+                created_request: false,
+                suite_id,
+                request_name: None,
+            });
+        }
+
+        let mut created_request = false;
+        let saved_requests = api_storage::list_saved_requests(&root)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        let request_name = if let Some(saved) = saved_requests.first() {
+            saved.name.clone()
+        } else {
+            let contract = super::contract_service::ensure_contract(&root)
+                .await
+                .map_err(|e| ServiceError::internal(&format!("failed to load contract: {e}")))?;
+
+            let endpoint = contract.endpoints.iter().next();
+            let (method, path) = if let Some(endpoint) = endpoint {
+                (endpoint.method.as_str().to_uppercase(), endpoint.path.clone())
+            } else {
+                ("GET".to_string(), "/__api/health".to_string())
+            };
+
+            let base = {
+                let runtime = state.runtime.read().await;
+                runtime
+                    .address
+                    .clone()
+                    .or_else(|| contract.servers.first().map(|s| s.url.clone()))
+                    .unwrap_or_else(|| "http://127.0.0.1:4010".to_string())
+            };
+
+            let request_name = Self::default_request_name(&method, &path);
+            let url = Self::join_url(&base, &path);
+
+            let saved = api_storage::SavedRequest {
+                name: request_name.clone(),
+                method,
+                url: Some(url),
+                endpoint_id: None,
+                headers: None,
+                body: None,
+            };
+            api_storage::save_request(&root, &saved)
+                .map_err(|e| ServiceError::internal(&e.to_string()))?;
+            created_request = true;
+            request_name
+        };
+
+        let suites_dir = Self::suites_dir(&root);
+        std::fs::create_dir_all(&suites_dir)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        let suite_id = "onboarding-first-test".to_string();
+        let suite_path = suites_dir.join(format!("{suite_id}.yaml"));
+        let suite_yaml = format!(
+            "name: Onboarding First Test\ntests:\n  - request: {}\n    assertions:\n      - type: status\n        range: [200, 399]\n",
+            request_name
+        );
+
+        std::fs::write(&suite_path, suite_yaml)
+            .map_err(|e| ServiceError::internal(&e.to_string()))?;
+
+        Ok(PrepareOnboardingResult {
+            created_suite: true,
+            created_request,
+            suite_id: Some(suite_id),
+            request_name: Some(request_name),
+        })
     }
 
     /// List all test suites
@@ -588,5 +722,52 @@ tests:
         let xml = TestingService::generate_junit_xml(&results);
         assert!(xml.contains("tests=\"2\""));
         assert!(xml.contains("failures=\"1\""));
+    }
+
+    #[tokio::test]
+    async fn test_prepare_onboarding_creates_suite_when_missing() {
+        let app_dir = tempdir().unwrap();
+        let project_dir = tempdir().unwrap();
+
+        std::fs::create_dir_all(project_dir.path().join(".repo-api/contract")).unwrap();
+        std::fs::write(
+            project_dir.path().join(".repo-api/contract/effective.json"),
+            r#"{
+  \"version\": \"1\",
+  \"metadata\": {\"title\": \"Test API\", \"version\": \"1.0.0\", \"repository_root\": null},
+  \"servers\": [{\"url\": \"http://127.0.0.1:4010\"}],
+  \"endpoints\": [{
+    \"id\": \"ep_health\",
+    \"operation_id\": \"health\",
+    \"method\": \"GET\",
+    \"path\": \"/health\",
+    \"summary\": null,
+    \"parameters\": [],
+    \"request_bodies\": [],
+    \"responses\": [],
+    \"security\": {\"requirements\": []},
+    \"confidence\": {\"score\": 1.0, \"level\": \"high\", \"reasons\": []},
+    \"evidence\": []
+  }],
+  \"schemas\": {\"schemas\": {}},
+  \"security_schemes\": [],
+  \"diagnostics\": [],
+  \"evidence\": {\"endpoint_evidence\": [], \"schema_evidence\": [], \"security_evidence\": []}
+}"#,
+        )
+        .unwrap();
+
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+        *state.active_root.write().await = Some(project_dir.path().to_path_buf());
+        *state.project.write().await = Some(crate::services::test_helpers::create_test_project(
+            project_dir.path(),
+        ));
+
+        let result = TestingService::prepare_onboarding(&state).await.unwrap();
+        assert!(result.created_suite);
+        assert!(result.suite_id.is_some());
+
+        let suites = TestingService::list_suites(&state).await.unwrap();
+        assert_eq!(suites.len(), 1);
     }
 }

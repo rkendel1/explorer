@@ -190,7 +190,13 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           title: journeyState.current_recommendation.title,
           description: journeyState.current_recommendation.description,
           actionLabel: journeyState.current_recommendation.primary_action,
-          action: () => onNavigate('tests'),
+          action: async () => {
+            await invoke('test_prepare_onboarding');
+            await invoke('test_run', {
+              request: { suiteId: null, testIds: null },
+            });
+            onNavigate('tests');
+          },
         };
       }
     }
@@ -253,7 +259,13 @@ function Workflows({ project, onNavigate }: WorkflowsProps) {
           title: 'Validate it with tests',
           description: 'Run a first test to make behavior safe and repeatable.',
           actionLabel: 'Run First Test',
-          action: () => onNavigate('tests'),
+          action: async () => {
+            await invoke('test_prepare_onboarding');
+            await invoke('test_run', {
+              request: { suiteId: null, testIds: null },
+            });
+            onNavigate('tests');
+          },
         };
       default:
         return {

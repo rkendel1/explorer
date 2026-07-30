@@ -3,7 +3,9 @@
 use serde::Deserialize;
 
 use crate::services::TestingService;
-use crate::services::testing_service::{TestExportFormat, TestRunConfig, TestRunResult};
+use crate::services::testing_service::{
+    PrepareOnboardingResult, TestExportFormat, TestRunConfig, TestRunResult,
+};
 use crate::{TestResultDetail, TestSuiteSummary};
 
 use super::{AppState, CommandResult, from_service, state_handle};
@@ -91,4 +93,13 @@ pub async fn test_export(
 
     let state = state_handle(&state);
     from_service(TestingService::export(&state, format, request.suite_id.as_deref()).await)
+}
+
+/// Ensure onboarding has at least one runnable suite.
+#[cfg_attr(feature = "tauri", tauri::command)]
+pub async fn test_prepare_onboarding(
+    state: AppState<'_>,
+) -> CommandResult<PrepareOnboardingResult> {
+    let state = state_handle(&state);
+    from_service(TestingService::prepare_onboarding(&state).await)
 }
