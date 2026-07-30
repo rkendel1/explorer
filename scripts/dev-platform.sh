@@ -36,18 +36,44 @@ echo "Starting desktop app (Tauri dev)..."
 ) &
 DESKTOP_PID=$!
 
+# cargo/npm each spawn their own child processes (the compiled binary,
+# vite, the tauri app). Killing just $BACKEND_PID/$DESKTOP_PID leaves those
+# grandchildren running as orphans, so walk the tree instead.
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "$pid" 2>/dev/null); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
 cleanup() {
   echo
   echo "Stopping platform processes..."
-  kill "$BACKEND_PID" "$DESKTOP_PID" 2>/dev/null || true
+  kill_tree "$BACKEND_PID"
+  kill_tree "$DESKTOP_PID"
   wait "$BACKEND_PID" 2>/dev/null || true
   wait "$DESKTOP_PID" 2>/dev/null || true
 }
 
 trap cleanup INT TERM EXIT
 
-wait -n "$BACKEND_PID" "$DESKTOP_PID"
-EXIT_CODE=$?
+# `wait -n` needs bash >= 4.3, but macOS ships bash 3.2, so poll instead.
+EXIT_CODE=0
+while true; do
+  if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+    wait "$BACKEND_PID"
+    EXIT_CODE=$?
+    break
+  fi
+  if ! kill -0 "$DESKTOP_PID" 2>/dev/null; then
+    wait "$DESKTOP_PID"
+    EXIT_CODE=$?
+    break
+  fi
+  sleep 1
+done
 
 if [ $EXIT_CODE -ne 0 ]; then
   echo "A process exited with code $EXIT_CODE" >&2
