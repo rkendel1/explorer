@@ -179,6 +179,12 @@ body {
   box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.12);
 }
 
+.path-hint {
+  color: #6b7280;
+  font-size: 0.85rem;
+  text-align: left;
+}
+
 .action-button {
   display: inline-flex;
   align-items: center;

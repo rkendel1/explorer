@@ -134,6 +134,30 @@
 			"type": "shell",
 			"command": "pkill -f \"api-cli mock /Users/randy/Desktop/multitenant --port 4012\" || true",
 			"problemMatcher": []
+		},
+		{
+			"label": "validate-url-guard-rust",
+			"type": "shell",
+			"command": "cargo check -p api-desktop-app",
+			"problemMatcher": []
+		},
+		{
+			"label": "validate-url-guard-frontend",
+			"type": "shell",
+			"command": "cd /Users/randy/Desktop/explorer/apps/desktop && npm run lint && npm run build",
+			"problemMatcher": []
+		},
+		{
+			"label": "run-project-service-regression-tests",
+			"type": "shell",
+			"command": "cargo test -p api-desktop-app test_open_project_rejects_repository_url test_project_open_and_close",
+			"problemMatcher": []
+		},
+		{
+			"label": "run-project-service-regression-url-test",
+			"type": "shell",
+			"command": "cargo test -p api-desktop-app test_open_project_rejects_repository_url",
+			"problemMatcher": []
 		}
 	]
 }

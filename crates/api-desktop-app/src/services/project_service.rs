@@ -59,11 +59,38 @@ pub struct ProjectSummary {
 pub struct ProjectService;
 
 impl ProjectService {
+    fn validate_repository_path(path: &Path) -> ServiceResult<()> {
+        let raw = path.to_string_lossy();
+        if raw.contains("://") {
+            return Err(ServiceError::validation(
+                "Repository URL detected. Clone locally and connect using the local folder path.",
+            ));
+        }
+
+        if !path.exists() {
+            return Err(ServiceError::not_found(&format!(
+                "Repository path '{}'",
+                path.display()
+            )));
+        }
+
+        if !path.is_dir() {
+            return Err(ServiceError::validation(format!(
+                "'{}' is not a directory",
+                path.display()
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Open a project at the given path
     pub async fn open_project(
         state: &Arc<DesktopStateManager>,
         path: PathBuf,
     ) -> ServiceResult<ProjectSummary> {
+        Self::validate_repository_path(&path)?;
+
         // Try to load existing project or create new one
         let project = match api_projects::load_project(&path) {
             Ok(Some(existing)) => existing,
@@ -333,6 +360,7 @@ impl ProjectService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::ServiceErrorCode;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -398,5 +426,22 @@ mod tests {
         // Verify file exists
         let restoration_path = app_dir.path().join("restoration_state.json");
         assert!(restoration_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_open_project_rejects_repository_url() {
+        let app_dir = tempdir().unwrap();
+        let state = Arc::new(DesktopStateManager::new(app_dir.path().to_path_buf()));
+
+        let result = ProjectService::open_project(
+            &state,
+            PathBuf::from("https://github.com/rkendel1/multitenant.git"),
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, ServiceErrorCode::ValidationError);
+        assert!(err.message.contains("Clone locally"));
     }
 }
